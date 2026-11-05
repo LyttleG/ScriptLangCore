@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/slc.png" alt="Logo" width="128">
+</p>
+
 # ScriptLangCore
 
 An embedded scripting language interpreter for .NET 11, written in C# with full NativeAOT compatibility.

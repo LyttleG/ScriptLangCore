@@ -4,10 +4,6 @@ An embedded scripting language interpreter for .NET 11, written in C# with full 
 
 **Author: Gérôme Guillemin.** ScriptLangCore, the language, the engine and this documentation are his work.
 
-**Semantic rules:** [`RULES.md`](../RULES.md) states, per rule, the chosen behaviour, the one place that
-implements it, the deliberate deviations from C#, and the duplicates that are not unified yet. Change it in the
-same commit as the rule.
-
 ## Pipeline
 
 ```

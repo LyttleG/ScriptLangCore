@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScriptLangCore: a .NET scripting engine for Windows</title>
+<meta name="description" content="ScriptLangCore is a C#-flavoured scripting language for Windows, shipped as a NativeAOT executable, an embeddable DLL with a C ABI and a SQLite extension, and a 1.2 MB launcher.">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --accent3: #d29922;
+    --code-bg: #1c2128;
+    --inline-code: #f0883e;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 8px; }
+  h1 { font-size: 2.1rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
+  h1 small { display: block; font-size: 1rem; font-weight: 400; color: var(--text-dim); letter-spacing: 0; margin-top: 6px; }
+  h2 { font-size: 1.35rem; font-weight: 600; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 0 0 6px; }
+  p { margin-bottom: 14px; color: var(--text-dim); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  strong { color: var(--text); }
+  code {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 0.85rem;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--inline-code);
+  }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 4px; }
+  .pill {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 11px;
+  }
+  .pill b { color: var(--text); font-weight: 600; }
+  .download {
+    display: block;
+    margin: 26px 0 10px;
+    padding: 18px 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 8px;
+  }
+  .download a.button {
+    display: inline-block;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #0d1117;
+    background: var(--accent2);
+    border-radius: 6px;
+    padding: 10px 18px;
+    margin-bottom: 8px;
+  }
+  .download a.button:hover { text-decoration: none; background: #4ac95c; }
+  .download p { margin: 0; font-size: 0.9rem; }
+  .download p + p { margin-top: 6px; }
+  .toc { display: grid; gap: 12px; margin-top: 6px; }
+  .card {
+    display: block;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: inherit;
+  }
+  .card:hover { border-color: var(--accent); text-decoration: none; }
+  .card h3 { color: var(--accent); }
+  .card p { margin: 0; font-size: 0.9rem; }
+  .card .path {
+    display: block;
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 0.78rem;
+    color: var(--inline-code);
+    margin-top: 8px;
+  }
+  .card .inside { display: block; font-size: 0.82rem; color: var(--text-dim); margin-top: 8px; }
+  ul.plain { list-style: none; margin: 6px 0 14px; }
+  ul.plain li { padding: 5px 0; border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: 0.92rem; }
+  ul.plain li:last-child { border-bottom: none; }
+  ul.plain li code { font-size: 0.8rem; }
+  .shapes { display: grid; gap: 10px; margin: 6px 0 0; }
+  .shape { padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+  .shape h3 { font-size: 0.95rem; color: var(--text); }
+  .shape p { margin: 4px 0 0; font-size: 0.88rem; }
+  .shape .size { color: var(--accent3); }
+  .donate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    margin: 8px 0 12px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid #0070ba;
+    border-radius: 8px;
+  }
+  .paypal-slot { min-height: 0; }
+  .paypal-slot img { display: block; max-height: 44px; max-width: 300px; }
+  a.donate-btn {
+    display: inline-block;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #ffffff;
+    background: #0070ba;
+    border-radius: 6px;
+    padding: 10px 18px;
+  }
+  a.donate-btn:hover { background: #005ea6; text-decoration: none; }
+  .donate-note { font-size: 0.85rem; margin: 0; }
+  footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 0.88rem; color: var(--text-dim); }
+  footer p { font-size: 0.88rem; margin-bottom: 6px; }
+  footer .author { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ScriptLangCore
+    <small>A C#-flavoured scripting engine for Windows, compiled ahead of time into one self-contained executable.</small>
+  </h1>
+  <div class="pills">
+    <span class="pill">Windows 10 1607+ <b>x64</b></span>
+    <span class="pill">NativeAOT, <b>no .NET to install</b></span>
+    <span class="pill">one exe <b>18.8 MB</b></span>
+    <span class="pill">embeddable DLL, <b>ABI 3</b></span>
+    <span class="pill"><b>530</b> test scripts</span>
+  </div>
+</header>
+
+<div class="download">
+  <!-- THE REPOSITORY URL IS WRITTEN HERE, ONCE. The three links below carry only a path, and the script at the
+       bottom of the page composes them from this href, so renaming the repository means editing this one string.
+       With scripting off the download still works and the three extras keep no link, which is a graceful loss. -->
+  <a class="button" id="download" href="https://github.com/OWNER/REPO/releases/latest/download/ScriptLangCoreSetup.exe">Download ScriptLangCoreSetup.exe</a>
+  <p><strong>The installer</strong> puts the engine, the launcher and the script folders on the machine, and adds the command to the path.</p>
+  <p>Other ways in: <a data-repo-path="releases">all releases</a>,
+     <a data-repo-path="">source</a>,
+     <a data-repo-path="issues">issues</a>.</p>
+</div>
+
+<h2 id="what">What it is</h2>
+<p><strong>ScriptLangCore</strong> runs <code>.slc</code> scripts, a C#-flavoured language with classes, interfaces, generics, structs, tuples, pattern matching, lambdas, coroutines, <code>async</code>/<code>await</code>, exceptions and a full Windows UI toolkit. A script is a text file; the engine lexes it, parses it into an AST, and runs it on one of two engines: a bytecode virtual machine for the bodies it can compile, and a tree walker for every shape it cannot, so a script never depends on what the compiler accepted.</p>
+<p>The runtime is NativeAOT: the .NET runtime is inside the executable, so a machine needs Windows and nothing else, with no .NET installation, no Visual C++ redistributable and no Universal CRT redistributable. The engine itself is written in C# and reaches Windows through flat P/Invoke calls rather than through a framework on top.</p>
+
+<h2 id="shapes">Four shapes, one engine</h2>
+<div class="shapes">
+  <div class="shape">
+    <h3>The command line: <code>ScriptLangCore.exe</code></h3>
+    <p>Runs a file, compiles it to a bundle, dumps bytecode, or opens a REPL. <span class="size">18.8 MB, self-contained.</span></p>
+  </div>
+  <div class="shape">
+    <h3>The engine as a DLL: <code>ScriptLangCore.dll</code></h3>
+    <p>A C ABI of sixteen <code>slc_*</code> verbs, plus SQLite extension functions, so a host in C, C#, Python, PowerShell or bash can create a session, run scripts, call into them and read the outcome as JSON. <span class="size">18.8 MB, 64-bit.</span></p>
+  </div>
+  <div class="shape">
+    <h3>The launcher: <code>ScriptLangCore.Launcher.exe</code></h3>
+    <p>A 1.2 MB shortcut onto the engine's own entry point, so a script can be packaged into its own Windows executable with the engine beside it. <span class="size">1.1 MB.</span></p>
+  </div>
+  <div class="shape">
+    <h3>Inside SQLite: the same DLL</h3>
+    <p><code>.load</code> the DLL into any 64-bit <code>sqlite3</code> and six functions appear, so SQL can evaluate a script expression over a row, fold a set, or map a list. <span class="size">no extra install.</span></p>
+  </div>
+</div>
+
+<h2 id="docs">Documentation</h2>
+<div class="toc">
+  <a class="card" href="docs/language/index.html">
+    <h3>Language Reference</h3>
+    <p>The language itself: every keyword, type, operator and built-in namespace, with a worked sample for each.</p>
+    <span class="inside">Syntax, classes and structs, generics, patterns, coroutines, the UI toolkit, COM, SQLite, HTTP, the command line and the REPL, <code>--compile</code> and what a bundle carries.</span>
+    <span class="path">docs/language/index.html</span>
+  </a>
+  <a class="card" href="docs/embed/howto.html">
+    <h3>Embedding the engine</h3>
+    <p>How to put the engine inside your own program: the C ABI, the output callback, threads and apartments, verdicts, and the SQLite door.</p>
+    <span class="inside">Session options, calling back into a script, packaging a script into an exe, the launcher, hosts that are not C (Python, PowerShell, bash), what a machine needs, and the limits stated plainly.</span>
+    <span class="path">docs/embed/howto.html</span>
+  </a>
+  <a class="card" href="docs/networking/howto.html">
+    <h3>Networking</h3>
+    <p>Servers and clients from a script: TCP, HTTP, WebSocket, and serving files on the same port without a second listener.</p>
+    <span class="inside">Quick start, the server and the client surfaces, how events are delivered, connection middleware, the engine's own messages, and measured limits.</span>
+    <span class="path">docs/networking/howto.html</span>
+  </a>
+  <a class="card" href="docs/mcp/howto.html">
+    <h3>MCP tools</h3>
+    <p>Exposing your own tools to an AI client over the Model Context Protocol, written as ordinary script functions.</p>
+    <span class="inside">The command line, writing a tool, the <code>RegisterMcpTool</code> API, argument marshalling, the path sandbox, the middleware pipeline, and the HTTP server middleware.</span>
+    <span class="path">docs/mcp/howto.html</span>
+  </a>
+</div>
+
+<h2 id="more">Also in the repository</h2>
+<ul class="plain">
+  <li><a href="docs/README.md">docs/README.md</a>: the index of the documentation, with the testing pipeline, the registries and the invariants the tree holds itself to.</li>
+  <li><a href="docs/architecture.md">docs/architecture.md</a>: how the lexer, the parser, the interpreter and the bytecode VM fit together.</li>
+</ul>
+
+<!--
+  SUPPORT AND DONATIONS (2026-11-04). The PayPal Donate SDK (developer.paypal.com/sdk/donate) is NOT used here, and this
+  comment says why so nobody re-adds it blindly: that SDK needs either a hosted_button_id (a business account) or an
+  account enabled for the Donate product, and PayPal answers "Cette organisation ne peut pas accepter de dons pour
+  l'instant" for gerome_71@yahoo.fr (its own donation page carries that refusal in the HTML it serves). A PayPal.Me
+  profile has no such requirement, so the button is a plain link to it, with no script and nothing to load from
+  paypal.com. If the account is ever enabled for donations, upgrading to a Business account and creating a button at
+  paypal.com/donate/buttons would allow the SDK variant instead (a hosted_button_id, an optional slot div and
+  donate-sdk.js); until then, this link is the one that works.
+-->
+<h2 id="support">Support the project</h2>
+<p>ScriptLangCore is written and maintained by one person. If it saves you time, a donation keeps the work going.</p>
+<div class="donate">
+  <a class="donate-btn" href="https://www.paypal.me/gerome71"
+     target="_blank" rel="noopener noreferrer">Donate with PayPal</a>
+  <p class="donate-note">Opens my PayPal.Me page (<code>@gerome71</code>), where the amount is yours to choose. A PayPal account is not required: a card works too.</p>
+</div>
+
+<h2 id="why">Why it is built this way</h2>
+<p><strong>One engine, not two.</strong> Bodies the compiler can model run on the bytecode VM; the rest run on the tree walker, and the two are kept at parity by tests that run the same script through both and compare the answers.</p>
+<p><strong>No runtime to deploy.</strong> NativeAOT means the artifact is the engine. The published DLL and exe import eighteen Windows libraries and nothing else, and the C runtime is linked in.</p>
+<p><strong>Checked against the shipped binary.</strong> The test corpus (530 scripts) is the instrument, together with the sweeps that compile every script, compare a compiled bundle with the script it came from, and re-run the same script on both engines.</p>
+
+<footer>
+  <p><span class="author">Gérôme Guillemin</span>, author and maintainer.</p>
+  <p>&copy; Gérôme Guillemin. ScriptLangCore is written in C# and targets .NET 11 with NativeAOT, for Windows x64.</p>
+</footer>
+
+<script>
+  // The repository URL lives in ONE place: the download button's href. The other GitHub links are composed from
+  // it here, so a rename is one edit and there is no second copy to forget. Nothing else on this page depends on
+  // a script, so with scripting off the download, the documentation links and the PayPal.Me button all still work.
+  (function () {
+    var download = document.getElementById('download');
+    if (!download) return;
+    var repo = download.href.replace(/\/releases\/latest\/download\/[^/?#]*$/, '');
+    if (repo === download.href) return; // the href is not the shape expected: leave the page as it is
+    var links = document.querySelectorAll('a[data-repo-path]');
+    for (var i = 0; i < links.length; i++) {
+      var tail = links[i].getAttribute('data-repo-path');
+      links[i].href = tail ? repo + '/' + tail : repo;
+    }
+  })();
+</script>
+
+</body>
+</html>

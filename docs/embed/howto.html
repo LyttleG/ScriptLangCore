@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embedding the engine: How To</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --accent3: #d29922;
+  --code-bg: #1c2128;
+  --inline-code: #f0883e;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+h1 { font-size: 2rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.02em; }
+h1 small { font-size: 1rem; color: var(--text-dim); font-weight: 400; }
+h2 { font-size: 1.4rem; font-weight: 600; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.1rem; font-weight: 600; margin: 28px 0 10px; }
+h4 { font-size: 0.95rem; font-weight: 600; margin: 20px 0 8px; color: var(--accent); }
+p { margin-bottom: 14px; color: var(--text-dim); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+strong { color: var(--text); }
+code {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--inline-code);
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 16px 0;
+  background: rgba(88,166,255,0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-dim);
+}
+blockquote strong { color: var(--text); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 0.85rem;
+}
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+th { background: var(--surface); font-weight: 600; color: var(--text); }
+td { color: var(--text-dim); }
+td code { font-size: 0.8rem; }
+ul, ol { margin: 8px 0 16px 20px; color: var(--text-dim); }
+li { margin-bottom: 4px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.note {
+  background: rgba(56,139,253,0.08);
+  border: 1px solid rgba(56,139,253,0.2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.tag-cli { background: rgba(210,153,34,0.15); color: var(--accent3); }
+.tag-api { background: rgba(63,185,80,0.15); color: var(--accent2); }
+.tag-info { background: rgba(88,166,255,0.15); color: var(--accent); }
+.toc { margin: 16px 0 24px; }
+.toc a { display: inline-block; margin: 2px 12px 2px 0; font-size: 0.88rem; }
+pre { position: relative; }
+.copy-btn {
+  position: absolute; top: 4px; right: 4px;
+  background: var(--border); color: var(--text-dim);
+  border: none; border-radius: 4px;
+  padding: 2px 8px; font-size: 0.7rem;
+  cursor: pointer; opacity: 0;
+  transition: opacity 0.15s;
+}
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: var(--accent); color: var(--bg); }
+.copy-btn.copied { background: var(--accent2); color: var(--bg); }
+@media (max-width: 600px) {
+  body { padding: 20px 12px 60px; }
+  h1 { font-size: 1.5rem; }
+  table { font-size: 0.78rem; }
+  th, td { padding: 5px 6px; }
+}
+</style>
+</head>
+<body>
+
+<h1>Embedding the engine <small>How To</small></h1>
+<p>This engine ships in three shapes. The <strong>CLI</strong> (<code>ScriptLangCore.exe</code>, 19.6 MB) does everything by itself. The <strong>shared library</strong> (<code>ScriptLangCore.dll</code>, 19.1 MB) exposes a C ABI of sixteen calls, for a native program that wants to run scripts inside its own process. The <strong>launcher</strong> (<code>ScriptLangCore.Launcher.exe</code>, 1.3 MB) holds no engine code at all: it loads the library and drives it, and it doubles as the smallest complete example of the ABI.</p>
+
+<div class="note"><strong>The library is the engine, not a wrapper.</strong> It is the same NativeAOT image the exe is built from, compiled as a shared library with the exports marked <code>[UnmanagedCallersOnly]</code>. Nothing is interpreted a second time and no second runtime is started, so a script answered through the ABI behaves as it does from the command line, crashes and depth guard included.</div>
+
+<h2>Table of contents</h2>
+<ul>
+<li><a href="#requirements">What a machine needs</a></li>
+<li><a href="#build">Building the artifacts</a></li>
+<li><a href="#quickstart">Quick start</a></li>
+<li><a href="#abi">The ABI</a></li>
+<li><a href="#options">Session options</a></li>
+<li><a href="#threads">Threads and apartments</a></li>
+<li><a href="#output">Output</a></li>
+<li><a href="#repl">The REPL is the engine's own</a></li>
+<li><a href="#verdicts">Verdicts</a></li>
+<li><a href="#call">Calling back into a script</a></li>
+<li><a href="#packaging">Packaging a script into one exe</a></li>
+<li><a href="#launcher">The launcher</a></li>
+<li><a href="#managed">Embedding from C# and .NET</a></li>
+<li><a href="#sqlite">SQLite as a third door</a></li>
+<li><a href="#hosts">Hosts that are not C: Python, PowerShell, bash</a></li>
+<li><a href="#limits">Limits, stated plainly</a></li>
+<li><a href="#verifying">Verifying an artifact</a></li>
+<li><a href="#trouble">Troubleshooting</a></li>
+</ul>
+
+<h2 id="requirements">What a machine needs</h2>
+<p>The published DLL and executable are NativeAOT images, so the runtime travels inside them. A deployment machine needs Windows and nothing else: no .NET installation, no Visual C++ redistributable, and no Universal CRT redistributable either.</p>
+
+<h3>The Windows floor</h3>
+<table>
+<tr><th>Requirement</th><th>Why</th></tr>
+<tr><td>Windows 10 version 1607 (build 14393), x64</td><td>The newest Windows API the engine calls is that version's DPI set (<code>GetDpiForWindow</code>, <code>GetSystemMetricsForDpi</code>, <code>GetDpiForSystem</code>, <code>AdjustWindowRectExForDpi</code>), and it is the oldest Windows client the .NET 11 runtime lists.</td></tr>
+<tr><td>Windows 10 version 1703 for the DPI mode the manifest names</td><td><code>dpiAwareness PerMonitorV2</code> and <code>SetProcessDpiAwarenessContext</code>. On an older build the engine falls back to <code>SetProcessDpiAwareness</code> from <code>shcore</code>, so a monitor is handled per-monitor v1 instead.</td></tr>
+<tr><td>Windows 11, Windows Server 2016 and later</td><td>Supported. The artifacts in this repository were built and run on Windows 11 25H2, build 26200.</td></tr>
+<tr><td>Windows 11 on ARM64</td><td>Runs the x64 image under the operating system's x64 emulation. There is no native arm64 build here.</td></tr>
+<tr><td>Windows 7 and 8.1</td><td>Not supported: the runtime does not list them, and the Universal CRT API sets the image imports are not part of those systems.</td></tr>
+</table>
+
+<h3>What it links against, and what it does not</h3>
+<p>The static imports are 18 DLLs and 396 functions, every one a Windows component: <code>KERNEL32</code>, <code>ADVAPI32</code>, <code>CRYPT32</code>, <code>bcrypt</code>, <code>ncrypt</code>, <code>Secur32</code>, <code>ole32</code>, <code>WS2_32</code>, <code>IPHLPAPI</code>, <code>VERSION</code>, two API sets of the core (one of them for <code>WaitOnAddress</code>, which is Windows 8 and later) and six API sets of the Universal CRT. It does <b>not</b> import the .NET runtime, <code>vcruntime140.dll</code>, <code>msvcp140.dll</code> or <code>ucrtbase.dll</code>: the C runtime is linked into the image, and the Universal CRT API sets are part of Windows 10.</p>
+<p>A further fifteen libraries are bound by name at the first call rather than at load, so an API a machine lacks answers as a refusal from that call instead of a failure to start: <code>user32</code>, <code>gdi32</code>, <code>comctl32</code>, <code>comdlg32</code>, <code>shell32</code>, <code>uxtheme</code>, <code>winmm</code>, <code>dwmapi</code>, <code>shcore</code>, <code>winhttp</code>, <code>ws2_32</code>, <code>advapi32</code>, <code>ole32</code>, <code>ntdll</code> and <code>kernel32</code>.</p>
+<p>The one library that is not part of Windows is <code>sqlite3.dll</code>, and only a script that uses <code>Sqlite</code> loads it. It ships beside the executable; a host that is not the engine must load it by full path first, as the <a href="#hosts">host section</a> describes.</p>
+
+<h3>Linux, macOS and anything else</h3>
+<p>There is no non-Windows build, and one cannot be produced from this host: <code>dotnet publish -r linux-x64</code> is refused with <code>Cross-OS native compilation is not supported</code>, because NativeAOT compiles to the target's machine code and needs that platform's toolchain. What a port would face is the platform layer rather than the language: 205 <code>[LibraryImport]</code> declarations across eight files (<code>Ui.cs</code> holds 145 of them, and 10,816 of the 93,187 lines in <code>src</code>), the COM bridge, MCI, the clipboard listener, global hotkeys, and six native calls the core itself needs (the dynamic export lookup, the thread stack probe behind the depth guard, the memory query behind the VM's frame cap, two handle queries). The language core does compile for <code>linux-x64</code> as IL, so the work is the platform layer and a UI toolkit, not the parser, the interpreter or the VM.</p>
+<p>Running the Windows artifact under Wine is not supported and is not tested here. A console script is the part most likely to work and a form is the part most likely not to, so treat Wine as an experiment rather than a deployment route.</p>
+
+<h2 id="build">Building the artifacts</h2>
+<p>One batch builds everything: <code>compile_aot.bat</code>. Each AOT artifact is a separate <em>configuration</em> of its project, which is what gives each its own <code>obj\</code> and <code>bin\</code> by construction, so no leg can be handed another leg's intermediate output.</p>
+
+<table>
+<tr><th>Artifact</th><th>Command</th><th>Lands in</th></tr>
+<tr><td><code>ScriptLangCore.exe</code></td><td><code>dotnet publish ScriptLangCore.csproj -c Release -r win-x64 --self-contained</code></td><td><code>publish-aot\</code></td></tr>
+<tr><td><code>ScriptLangCore.dll</code></td><td><code>dotnet publish ScriptLangCore.csproj -c Embed -r win-x64 --self-contained -o publish-dll</code></td><td><code>publish-dll\</code></td></tr>
+<tr><td><code>ScriptLangCore.Launcher.exe</code></td><td><code>dotnet publish src\embed\launcher\EmbedLauncher.csproj -c Launcher -r win-x64 --self-contained -o publish-launcher</code></td><td><code>publish-launcher\</code></td></tr>
+</table>
+
+<p>The library is published with <code>NativeLib=Shared</code> and <code>OutputType=Library</code>, which the <code>Embed</code> configuration states. An image without exports answers nothing: the export list is written to <code>obj\Embed\net11.0\win-x64\native\ScriptLangCore.def</code> and lists all sixteen names, which is the cheapest way to confirm a build is the one you think it is.</p>
+
+<div class="note"><strong>A configuration you invent must say <code>Optimize</code>.</strong> The SDK leaves <code>Optimize</code> false for a configuration name it does not know, and the AOT compiler derives both its codegen mode and method-body folding from it. Without the line, this engine's library came out at 37 MB instead of 19 MB for the same sources. Both configurations here state it.</div>
+
+<h2 id="quickstart">Quick start</h2>
+<p>A complete C program: load the library, start a session, register an output callback, run a file, release. It takes the DLL's path on the command line so it works from any directory.</p>
+
+<pre><code>#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;windows.h&gt;
+
+typedef int  (*slc_version_fn)(char*, int);
+typedef int64_t (*slc_create_fn)(const char*);
+typedef int  (*slc_set_output_fn)(int64_t, void*, void*);
+typedef int  (*slc_run_file_fn)(int64_t, const char*);
+typedef int  (*slc_free_fn)(int64_t);
+typedef int  (*slc_last_error_fn)(int64_t, char*, int);
+
+static void on_line(int64_t handle, int32_t channel, const char* utf8, void* user)
+{
+    fputs(channel == 0 ? utf8 : "", channel == 0 ? stdout : stderr);
+    fputc('\n', channel == 0 ? stdout : stderr);
+}
+
+int main(int argc, char** argv)
+{
+    if (argc &lt; 3) { fprintf(stderr, "usage: %s &lt;engine.dll&gt; &lt;script.slc&gt;\n", argv[0]); return 2; }
+
+    HMODULE lib = LoadLibraryA(argv[1]);
+    if (!lib) { fprintf(stderr, "no library at %s (error %lu)\n", argv[1], GetLastError()); return 3; }
+
+    slc_version_fn    version = (slc_version_fn)    GetProcAddress(lib, "slc_version");
+    slc_create_fn     create  = (slc_create_fn)     GetProcAddress(lib, "slc_create");
+    slc_set_output_fn output  = (slc_set_output_fn) GetProcAddress(lib, "slc_set_output");
+    slc_run_file_fn   runfile = (slc_run_file_fn)   GetProcAddress(lib, "slc_run_file");
+    slc_free_fn       release = (slc_free_fn)       GetProcAddress(lib, "slc_free");
+    slc_last_error_fn lasterr = (slc_last_error_fn) GetProcAddress(lib, "slc_last_error");
+
+    char text[256];
+    version(text, sizeof text);
+    printf("%s\n", text);
+
+    int64_t session = create("{\"home\":\"C:\\\\engine\"}");   /* the folder holding assets\ and tools\ */
+    if (session == 0) { lasterr(0, text, sizeof text); fprintf(stderr, "no session: %s\n", text); return 3; }
+
+    output(session, (void*)on_line, NULL);
+    int status = runfile(session, argv[2]);
+    if (status != 0) { lasterr(session, text, sizeof text); fprintf(stderr, "run answered %d: %s\n", status, text); }
+
+    release(session);
+    FreeLibrary(lib);
+    return status;
+}</code></pre>
+
+<p>Build it with <code>cl demo.c</code> (the exports are looked up at run time, so no import library is needed) or link the import library that the publish leaves beside the native object files, <code>bin\Embed\net11.0\win-x64\native\ScriptLangCore.lib</code>.</p>
+
+<div class="note"><strong>Strings are UTF-8 and the buffers are yours.</strong> Every output takes a caller-owned buffer and follows the <code>snprintf</code> convention: the call returns the length it NEEDS, writes at most <code>capacity - 1</code> bytes plus a terminator, and answers the same length when <code>capacity</code> is 0, so <code>slc_last_error(session, NULL, 0)</code> sizes the buffer. Nothing you receive points into engine memory.</div>
+
+<h2 id="abi">The ABI</h2>
+<table>
+<tr><th>Call</th><th>Signature</th><th>Answers</th></tr>
+<tr><td><code>slc_version</code></td><td><code>int slc_version(char* buf, int cap)</code></td><td>the engine version, the runtime and the ABI revision</td></tr>
+<tr><td><code>slc_create</code></td><td><code>int64_t slc_create(const char* optionsJson)</code></td><td>a session handle, or 0 with the reason in <code>slc_last_error(0, ...)</code></td></tr>
+<tr><td><code>slc_free</code></td><td><code>int slc_free(int64_t h)</code></td><td>0 released, 2 unknown handle, 3 a run is in flight</td></tr>
+<tr><td><code>slc_thread_mode</code></td><td><code>int slc_thread_mode(int64_t h)</code></td><td>0 the engine's own thread, 1 the host's, -1 unknown</td></tr>
+<tr><td><code>slc_set_output</code></td><td><code>int slc_set_output(int64_t h, void* cb, void* user)</code></td><td>0 installed, NULL removes the callback</td></tr>
+<tr><td><code>slc_run_file</code></td><td><code>int slc_run_file(int64_t h, const char* path)</code></td><td>the run's status</td></tr>
+<tr><td><code>slc_run_text</code></td><td><code>int slc_run_text(int64_t h, const char* source, const char* name)</code></td><td>the run's status (a name is optional and may be a path)</td></tr>
+<tr><td><code>slc_run_bundle</code></td><td><code>int slc_run_bundle(int64_t h, const char* path)</code></td><td>the run's status (a <code>.slcbc</code>)</td></tr>
+<tr><td><code>slc_run_bundle_bytes</code></td><td><code>int slc_run_bundle_bytes(int64_t h, const void* data, int count)</code></td><td>the run's status, for a bundle held in memory (a packaged exe); what a source-less payload answers travels in <code>slc_last_result</code>'s <code>Result</code>, as it does for every run verb</td></tr>
+<tr><td><code>slc_main</code></td><td><code>int slc_main(int64_t h, const char* argvJson)</code></td><td>the code the process would exit with, from the engine's own argument dispatch</td></tr>
+<tr><td><code>slc_main_owns</code></td><td><code>int slc_main_owns(const char* argument)</code></td><td>1 when that first argument is one the engine's dispatch owns (`--compile`, `--repl`, `--mcp`, ...)</td></tr>
+<tr><td><code>slc_repl</code></td><td><code>int slc_repl(int64_t h)</code></td><td>the session's exit code, after running the engine's own REPL on stdin</td></tr>
+<tr><td><code>slc_call</code></td><td><code>int slc_call(int64_t h, const char* fn, const char* argsJson)</code></td><td>the call's status, the value in <code>slc_last_result</code></td></tr>
+<tr><td><code>slc_cancel</code></td><td><code>int slc_cancel(int64_t h)</code></td><td>0 the request was made, 2 nothing was running</td></tr>
+<tr><td><code>slc_last_error</code></td><td><code>int slc_last_error(int64_t h, char* buf, int cap)</code></td><td>one sentence, or empty when the last call succeeded</td></tr>
+<tr><td><code>slc_last_result</code></td><td><code>int slc_last_result(int64_t h, char* buf, int cap)</code></td><td>the last run or call as JSON</td></tr>
+<tr><td><code>slc_stats</code></td><td><code>int slc_stats(int64_t h, char* buf, int cap)</code></td><td>a JSON snapshot of the session</td></tr>
+</table>
+
+<p>Four rules decide the rest. <strong>Nothing throws across the boundary</strong>: a failure is a status plus a message, never a C++ exception, a stack trace or a resource key. <strong>One call at a time per handle</strong>: a verb names its refusal when another is in flight rather than interleaving. <strong>Handles are never reused</strong>: a stale handle answers "no session with that handle" instead of hitting a new session. <strong>The host's console is never touched</strong>: with no callback registered, a script's output is dropped rather than written into your stdout.</p>
+
+<p><strong>Two verbs, two kinds of file, and the engine says which.</strong> <code>slc_run_file</code> reads SOURCE, so a compiled bundle handed to it is refused by name (<code>... is a compiled bundle, not source text: run it with slc_run_bundle</code>) instead of being parsed as text. <code>slc_run_bundle</code> runs a <code>.slcbc</code> in either shape: one carrying its program as source runs that source, and one built with <code>--source=strip</code> runs its compiled entry. Which one a file is, is decided from its first four bytes, so the extension cannot lie about it.</p>
+
+<h2 id="repl">The REPL is the engine's own</h2>
+<p><code>slc_repl</code> runs exactly the loop <code>ScriptLangCore.exe</code> opens with no arguments: the same banner and prompt, the same dot commands (<code>.help</code>, <code>.vars</code>, <code>.run</code>, <code>.gc</code>, <code>.export</code>, <code>.exit</code>, and the rest), the same history and the same Ctrl+C behaviour. A host that wants a console front end therefore needs no REPL of its own, which is what the launcher does with no arguments.</p>
+
+<pre><code>ScriptLangCore.Launcher.exe
+ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 3
+&gt;&gt;&gt; 1 + 1
+= 2
+&gt;&gt;&gt; print("hello from the engine")
+hello from the engine
+&gt;&gt;&gt; .exit
+👋 Goodbye!</code></pre>
+
+<h3>Running a tool from that prompt, with its arguments</h3>
+<p><code>.run</code> executes a file in the session, and everything after <code>--</code> is the SCRIPT's command line rather than another file, so a tool that takes its input from <code>Application.Args</code> runs from the prompt exactly as it would from a shell. This is the whole packaging workflow performed inside the launcher's own REPL, starting in the folder the launcher lives in (<code>app.slc</code> is the script to package):</p>
+
+<pre><code>publish-launcher&gt; ScriptLangCore.Launcher.exe
+&gt;&gt;&gt; .run ..\assets\language\probes\slc-pack.slc -- ScriptLangCore.Launcher.exe app.slc myapp.exe --version 1.2.3.4
+packed: myapp.exe &lt;- app.slc (script text, 35 byte(s))
+resource: SLCPAYLOAD = 35 byte(s) (matches the payload)
+version: 1.2.3.4 (VS_FIXEDFILEINFO under RT_VERSION 1)
+exe: 1306624 byte(s) at D:\...\publish-launcher\myapp.exe; run it, with the engine DLL beside it
+  Done: 1 file(s) in 0:00 (68 ms)
+&gt;&gt;&gt; .exit
+👋 Goodbye!
+
+publish-launcher&gt; myapp.exe
+hello from a packaged app</code></pre>
+
+<p>Four things make that work, and each one is a rule a reader will otherwise trip over. The arguments after <code>--</code> arrive as <code>[the tool's path, ScriptLangCore.Launcher.exe, app.slc, myapp.exe, --version, 1.2.3.4]</code>, which is the same list the CLI gives a script, so a file written for the command line needs no second form. A QUOTED argument stays one argument, which is how a path with a space gets through: <code>-- "C:\Program Files\app.exe"</code>. A relative path is a SEARCH (as given, then beside the tool, then each ancestor of the tool's folder), which is why <code>..\assets\language\probes\slc-pack.slc</code> and a bare <code>ScriptLangCore.Launcher.exe</code> both resolve even when the prompt was started somewhere else; the tool reports the path it used, so nothing is guessed silently. And the arguments belong to THAT run: the next statement reads the session's own <code>Application.Args</code> again.</p>
+
+<div class="note"><strong>There is no shell behind the prompt.</strong> A wildcard is literal text (<code>*.slc</code> is not expanded), there is no redirection or piping, and <code>.run</code> resolves the file itself (a direct path, a glob it expands, <code>|</code>-separated lists). That is the price of a prompt that runs the engine in-process, and it is why the tool's own arguments are the thing <code>--</code> exists for.</div>
+
+
+<p>Two divisions of labour are worth knowing before wiring it into a UI. The PROMPT, the echoes and a dot command's own output go to the PROCESS's standard output, because a REPL's terminal is its user interface; a script's <code>print</code> and the engine's log lines still travel through the output callback, so a host renders the program's output wherever it likes. And the interpreter is the SESSION's, adopted rather than replaced: the REPL ends without disposing it, so <code>slc_call</code> and a later run still see what was typed, while <code>.reset hard</code> is refused with a line saying why (it exists to replace the interpreter, and the host holds a handle to this one; <code>.reset all</code> clears it in place).</p>
+
+<h2 id="options">Session options</h2>
+<p><code>slc_create</code> takes one JSON object. Every key is optional, and an unknown key is refused by name rather than ignored, so a typo does not silently leave you with the defaults.</p>
+
+<table>
+<tr><th>Key</th><th>Meaning</th><th>Default</th></tr>
+<tr><td><code>home</code></td><td>the engine's own folder: its <code>assets\</code>, <code>tools\</code> and the natives it loads by name, such as <code>sqlite3.dll</code>.</td><td>beside the host executable</td></tr>
+<tr><td><code>image</code></td><td>what <code>Application.FilePath</code> reports.</td><td>the host's own image</td></tr>
+<tr><td><code>args</code></td><td>what <code>Application.Args</code> reports, WITHOUT an executable path.</td><td>no arguments</td></tr>
+<tr><td><code>thread</code></td><td><code>"auto"</code>, <code>"own"</code> or <code>"host"</code>. See the next section.</td><td><code>"auto"</code></td></tr>
+</table>
+
+<p><code>args</code> defaults to EMPTY on purpose: the host's own command line is another program's flags, and a script that read them would be reading something nobody gave it. A relative path passed to <code>slc_run_file</code> resolves against the host's current directory, which is the rule any other library follows.</p>
+
+<h2 id="threads">Threads and apartments</h2>
+<p>A session runs a script on ONE thread, and which thread it is decides two things this engine cannot fake: how deep a script may recurse (the depth guard measures what is LEFT of the stack a run is on) and whether COM works at all (COM Automation here requires an STA thread).</p>
+
+<table>
+<tr><th>Mode</th><th>What happens</th></tr>
+<tr><td><code>"auto"</code></td><td>the HOST's thread when it is STA and offers at least 16 MB of stack, otherwise a thread the session creates: 32 MB, STA, named <code>SLC embed</code>.</td></tr>
+<tr><td><code>"own"</code></td><td>always a thread of the session's own. This is how a host whose calling thread is small still gets a 32 MB budget.</td></tr>
+<tr><td><code>"host"</code></td><td>never a thread of its own: the session FAILS at <code>slc_create</code> if the calling thread cannot carry a run, naming the reason (the apartment, or how much stack it found). Zero marshalling, and the session can only be driven from that thread.</td></tr>
+</table>
+
+<p><code>slc_thread_mode</code> tells you which you got, and <code>slc_stats</code> reports the apartment and the stack in megabytes. A console program's main thread is MTA with about 1 MB, so <code>"auto"</code> there gives the engine's own thread, which is why 50,000-deep recursion and a form both work from a plain launcher.</p>
+
+<div class="note"><strong>Why 16 MB is the number.</strong> The engine's shipped exe gives its main thread 32 MB. A DLL runs on the HOST's stack instead, and the same script that recursed 1,392,612 frames in the exe refused at 59,990 inside a host thread, because the guard measures what is left of somebody else's budget. Half the engine's own number is the point where a host thread is worth using, and below it the session takes a thread of its own.</div>
+
+<h2 id="output">Output</h2>
+<p><code>slc_set_output</code> takes one callback, shared by two channels: 0 is the script's <code>print</code>, 1 is the engine's own log lines (a warning, an error, a refusal the engine composed). It is invoked on the thread that runs the script, with a NUL-terminated UTF-8 string that is valid only for the duration of the call, so copy it if you keep it.</p>
+
+<pre><code>typedef void (*slc_line_cb)(int64_t handle, int32_t channel, const char* utf8, void* user);</code></pre>
+
+<p>A callback may not drive its own session: it runs on the session's thread, so a verb called from inside one is refused by name instead of waiting on itself. Post the work to another thread if a callback needs to run something.</p>
+
+<h2 id="verdicts">Verdicts</h2>
+<p>A run's status is the engine's own exit code family, so the numbers match what the CLI exits with: <code>0</code> done, <code>1</code> failed, <code>2</code> the call itself was wrong (a missing path, an unknown option), <code>3</code> the engine refused or is busy. A script that ends with <code>exit(n)</code> answers <code>n</code>.</p>
+
+<p><code>slc_last_result</code> carries the detail as JSON, which is what a host should log or show. Every member is PascalCase, the same convention every other object this engine writes for a host uses (<code>slc_stats</code>, a form document):</p>
+
+<pre><code>{"Status":1,"Ok":false,"Error":true,"Fatal":false,"Cancelled":false,
+ "Code":"Unspecified","Message":"Division by zero","Line":2,"Column":5}</code></pre>
+
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>Status</code></td><td>the number the process would exit with</td></tr>
+<tr><td><code>Error</code> / <code>Fatal</code></td><td>a script failure, or an unexpected engine failure (the arm that also asks for a crash-ring dump)</td></tr>
+<tr><td><code>Cancelled</code></td><td>the run was stopped by <code>slc_cancel</code> rather than failing. A cancelled run is never reported as the author's mistake</td></tr>
+<tr><td><code>Code</code>, <code>Message</code>, <code>Line</code>, <code>Column</code>, <code>Frames</code></td><td>the engine's own sentence and where it happened, plus the script frames when the failure came from inside a function. A frame reads <code>Inner [L12:C5]</code>: the function, and the position it was entered at, so a host can log a trace a reader can follow</td></tr>
+<tr><td><code>Checks</code></td><td>what the <code>Check</code> family reported during THIS run: <code>{"Passed":0,"Failed":1,"Checks":[{"Label":"this test will fail","Line":1,"Column":6}]}</code>. Absent when the run reported no check. It exists because a suite's own verdict is <code>exit(CheckFailed())</code>, which is the SCRIPT's decision, so the status alone says 1 and nothing else</td></tr>
+<tr><td><code>Result</code></td><td>the run's answer serialized as JSON: for <code>slc_call</code> the function's return value, and for a run that reported checks the <code>Checks</code> report itself, with the value the run ended with inside it named for where it came from: <code>Answer</code> when the script has a top-level <code>return &lt;value&gt;</code>, <code>Echo</code> when it is only the value of the last expression statement (the <code>= ...</code> a REPL prints). Measured, a suite ending <code>CheckSummary(); exit(CheckFailed());</code> answers <code>"Echo":false</code>, which is that call's value and not a verdict. <code>slc_run_file</code> and <code>slc_run_text</code> report it; <code>slc_main</code> records a verdict rather than an answer, so there the report appears as <code>Checks</code> alone</td></tr>
+<tr><td><code>ResultFrom</code></td><td><code>"checks"</code> when <code>Result</code> is that report rather than a value the script returned, so a host can tell the two apart</td></tr>
+</table>
+
+<div class="note"><strong>A failed <code>slc_main</code> run reports the same detail.</strong> <code>slc_main</code> runs the
+executable's own dispatch, so a host that launches a file through it (a launcher does) used to learn only the code: the message,
+the position and the frames went to a console the host does not own, and the verdict read
+<code>{"Status":1,"Ok":false,"Error":false,"Fatal":false,"Cancelled":false}</code>. It now carries them, taken from the same run
+the CLI describes.</div>
+
+<h2 id="call">Calling back into a script</h2>
+<p>A run happens in the SESSION's interpreter, so whatever a file declared stays callable. <code>slc_call</code> takes a function name and a JSON array of arguments, and answers the return value in <code>slc_last_result</code>:</p>
+
+<pre><code>slc_run_file(session, "rules.slc");            /* declares int Score(int n) */
+slc_call(session, "Score", "[21]");            /* status 0 */
+/* slc_last_result -&gt; {"Status":0,...,"Result":42} */</code></pre>
+
+<p>A name nothing declares is a usage refusal that says so, not a silent success. Arguments are coerced by the script's own parameter types, so <code>[21]</code> reaches an <code>int</code> parameter as an integer and a string reaches a <code>string</code>.</p>
+
+<h2 id="packaging">One exe, one DLL: a script packaged into the launcher</h2>
+<p>The launcher carries a <strong>resource slot</strong> called <code>SLCPAYLOAD</code> (type <code>RT_RCDATA</code>), and a script can fill it: copy the launcher, write the payload into the copy's resource, done. The copy then IS the application, with the engine DLL beside it.</p>
+
+<pre><code>slc-pack.slc &lt;launcher.exe&gt; &lt;script.slc | bundle.slcbc&gt; [&lt;out.exe&gt;] [--icon &lt;file.ico&gt;] [--version &lt;a.b.c.d&gt;]
+            [--gui | --console]
+
+ScriptLangCore.exe assets\language\probes\slc-pack.slc ScriptLangCore.Launcher.exe app.slc app.exe
+ScriptLangCore.exe assets\language\probes\slc-pack.slc ScriptLangCore.Launcher.exe app.slcbc app.exe
+ScriptLangCore.exe assets\language\probes\slc-pack.slc ScriptLangCore.Launcher.exe app.slc app.exe --icon app.ico --version 1.2.3.4
+ScriptLangCore.exe assets\language\probes\slc-pack.slc ScriptLangCore.Launcher.exe form.slc form.exe --gui
+app.exe first second</code></pre>
+
+<p><strong>The subsystem is the packaging choice that decides whether the app owns a console.</strong> The launcher is a console exe, so a copy of it puts a black window on screen at every double-click even when the payload only opens a form. <code>--gui</code> writes subsystem 2 (Windows subsystem) into the copy and <code>--console</code> writes 3 back; no flag leaves the launcher's own byte alone, so a script that already packages keeps behaving as it does. The field is the DOS header's <code>e_lfanew</code> at <code>0x3C</code>, the PE signature after it, and <code>Subsystem</code> at <code>OptionalHeader + 0x44</code>, which is <code>pe + 0x5C</code> for 32-bit and 64-bit images alike. Two consequences a packager should know: a GUI image still writes to a redirected stream (<code>app.exe &gt; out.txt</code> captures every <code>print</code>, since the handles are inherited), while a double-clicked one has no console to write to, so a form app is the shape <code>--gui</code> is for and a command-line tool is the shape it is not. Patching the header also invalidates a signature and the PE checksum, so pack first and sign afterwards.</p>
+
+<p><strong>One door to the console, never two.</strong> A console image has its console before its first statement runs, so a script that then calls <code>AllocConsole</code> (or frees and re-creates it in order to position it) produces a second window: the first one flashes white as it paints and then goes away. A GUI image owns no console at all, which is why the window the payload creates is the only one that ever appears. The rule is therefore one door per app: <code>--gui</code> when the script opens its own console, and in that case call it BEFORE the first <code>print</code>, because a GUI image has nowhere to write until then; <code>--console</code> when the caller's console is the one to use, and in that case the script must not create one. Either way, a GUI image started from a shell still writes to a redirected stream (<code>app.exe &gt; out.txt</code> captures every line), while the same output without a redirection goes nowhere: that is the trade the flag makes.</p>
+
+<p><strong>From a session, pass the tool its arguments after <code>--</code>:</strong> <code>.run assets\language\probes\slc-pack.slc -- ScriptLangCore.Launcher.exe app.slc app.exe --version 1.2.3.4</code>. Everything after the separator is the SCRIPT's command line (<code>Application.Args</code> is its own path plus those words, quoted ones kept whole), so a tool whose input is its argv needs no second form and no wrapper script.</p>
+
+<p><strong>The app can name itself.</strong> <code>--icon</code> replaces the launcher's own icon: each image of the given <code>.ico</code> becomes an <code>RT_ICON</code> under the launcher's group id (32512, the id .NET's <code>&lt;ApplicationIcon&gt;</code> uses, so Explorer and the taskbar read it with no shell work), and the image bytes are the file's own. <code>--version</code> writes a minimal <code>VS_VERSIONINFO</code> carrying <code>VS_FIXEDFILEINFO</code>, which is the part that answers "File version" in the properties dialog and <code>FileVersionInfo.FileMajorPart</code> and friends; there is no <code>StringFileInfo</code>, so the company and product strings still read empty, and that is the one field to add if you need them.</p>
+
+<p><strong>A packaged exe is still the CLI when asked.</strong> Its payload runs for its OWN arguments, and an argument the engine's dispatch owns (<code>--compile</code>, <code>--repl</code>, <code>--dump-bytecode</code>, <code>--mcp</code>, <code>--mcp-bc</code>) takes over exactly as it would on the unpacked launcher, so a packaged app can compile a file or open the REPL. The launcher asks the engine (`slc_main_owns`) rather than keeping a list of its own, which is why a flag added to the engine works in a packaged app the day it lands, and why a flag the APP invents (<code>--verbose</code>) still reaches the app.</p>
+
+<p>Three more rules make the packed exe behave like an application rather than like a script with a wrapper. The payload is identified by <strong>content</strong>, its first four bytes, so a bundle's bytes and a script's text travel in the same slot with no second convention (and the packer reports which it found). <code>Application.Args</code> is the packed exe's own command line with the exe dropped, exactly as the CLI reports it, so <code>Application.Args[0]</code> is <code>app.exe</code> in a packed app where it is <code>app.slc</code> under the CLI. And the run's directory is the <strong>exe's folder</strong>, so <code>./</code> and <code>Script.Directory()</code> point at where the application lives, not at wherever it was started.</p>
+
+<p><strong>One payload, so one file.</strong> A packaged app carries its script and nothing else: a script that <code>import</code>s a sibling module, reads a data file by a relative path or opens a template beside itself needs those files next to the exe, exactly as it would unpacked. Packing a <em>bundle</em> is what makes the app a single file: a bundle carries its functions and, unless it was stripped, its own source, and its literal imports still resolve against the exe's folder. There is no extraction to disk either: the payload is read into memory and run from there, which is why nothing appears in a temporary folder when a packaged app starts.</p>
+
+<div class="note"><strong>The slot is created by the packer, not by the build.</strong> A NativeAOT image cannot be given a Win32 resource from MSBuild (<code>&lt;Win32Resource&gt;</code> is ignored by the native link, measured), so the unpacked launcher simply has no such entry and the packer's <code>UpdateResource</code> adds one. That is also why the launcher's test for "am I packaged?" is the entry's absence or a zero size, and why it costs nothing when it is not.</div>
+
+<h3>When the engine DLL is not there, the app SAYS SO in a window</h3>
+<p>A package is the launcher plus a payload, and the engine (<code>ScriptLangCore.dll</code>, with its <code>assets\</code>,
+<code>tools\</code> and <code>sqlite3.dll</code>) is the third thing it needs. Reported from a live run: a packaged GUI app
+started without that DLL exited with code 3 and showed <strong>nothing at all</strong>, because the launcher's explanation
+went to a stderr a windowed app does not have. It now shows a message box, titled
+<code>ScriptLangCore: the engine DLL is missing</code>, listing where it looked and what to copy, and it keeps the stderr
+lines for a console run, a script and <code>tools/embed-check.sh</code>. The box appears when nobody would see those lines,
+which is <strong>three shapes, not one</strong>: a double-clicked GUI copy (no console at all), a double-clicked
+<em>console</em> copy (Windows gives it a console of its own, and that console disappears with the process, so the words
+would flash and vanish), and anything else where stdout and stderr are a real window rather than a pipe or a file. A shell
+shares its console with the app, and a captured run reads stderr through a pipe, so neither gets a box. It is
+<code>MessageBoxTimeoutW</code> with a 20 second timeout, so a window nobody is there to dismiss cannot hang a machine. The
+same door covers a DLL that exists but will not load, and an engine that refuses to start a session.</p>
+
+<h3>The same packaging from the compiler UI</h3>
+<p><code>assets\language\bc\bc_compiler_ui.slc</code> carries the same mechanism as a button: row 2 builds a package out of
+what row 1 produced, with two boxes that are the only two choices it has. <code>package the .slcbc (else the .slc)</code>
+says WHAT travels (the compiled bundle, or the source itself when nothing is compiled yet), and
+<code>windowed exe (no console)</code> says WHICH KIND of exe it becomes (subsystem 2, a WinExe; unticked leaves the console
+exe a launcher copy already is). The launcher is SEARCHED for rather than named, the output is derived from the payload
+(<code>&lt;name&gt;.exe</code> beside it), and the log reads the copy back: the resource's stored size against the payload's
+and the subsystem byte as the file now answers it, so a package is reported by what it IS rather than by what the calls
+returned. Its headless self-test packages the subject both ways, verifies each copy and deletes its own artifact.</p>
+<h2 id="launcher">The launcher</h2>
+<p><code>publish-launcher\</code> holds a 1.3 MB exe with no engine in it, plus the DLL and its <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> beside it, so the folder runs as published:</p>
+
+<pre><code>ScriptLangCore.Launcher.exe myscript.slc arg1 arg2
+ScriptLangCore.Launcher.exe a_bundle.slcbc</code></pre>
+
+<p>It writes nothing of its own by default, which is the property a packaged app needs: <code>print</code> goes to stdout, the engine's log lines go to stderr, and the exit code is the script's own verdict. The engine's version line is one environment variable away (<code>SLC_LAUNCHER_INFO=1</code>), which is how a stale DLL is told from a fresh one when a report looks wrong, and <strong>the run's verdict JSON is behind that same switch</strong>: without it a run that chooses <code>exit(3)</code> leaves stderr empty, exactly as the CLI does, because a script picking its own code is not a failure. That distinction is not cosmetic: a suite asserts that its child's stderr is silent for a chosen exit code, so an unconditional verdict line made two suites report errors the engine never raised. A host that wants the reason reads it on demand (<code>slc_last_result</code>, or this switch). It is also the working sample for the ABI: everything it does is the quick start above.</p>
+
+<h3>Where the launcher finds the engine</h3>
+<p><code>ScriptLangCore.dll</code> does not have to sit beside the exe: one engine can serve many launchers, which is what you want when several small apps share a single 19 MB DLL. The search runs in four steps, and the first hit wins:</p>
+
+<table>
+<tr><th>step</th><th>what it looks for</th></tr>
+<tr><td><code>SLC_ENGINE_DLL</code></td><td>a FILE named by that environment variable</td></tr>
+<tr><td>beside the exe</td><td>the shipped shape, and the one a packaged app uses: a copy here WINS over the two steps below</td></tr>
+<tr><td><code>SLC_ENGINE_HOME</code></td><td>that directory, holding <code>ScriptLangCore.dll</code></td></tr>
+<tr><td><code>PATH</code></td><td>each directory in its own order, first hit wins</td></tr>
+</table>
+
+<p><strong>Beside the exe comes before the environment on purpose.</strong> An installed engine sets <code>SLC_ENGINE_HOME</code> for every process on the machine, so with the environment first a packaged app that SHIPS its own engine would silently run the installed one instead, changing the version the app was built against. A launcher with no engine of its own still finds an installed one through the environment or <code>PATH</code>, and <code>sqlite3.dll</code> follows whichever engine answered, because the engine's home is the folder its own DLL came from.</p>
+
+<pre><code>rem one shared engine, several launchers, nothing copied beside them
+set SLC_ENGINE_HOME=C:\Tools\ScriptLangCore
+myapp.exe
+
+rem or: the engine's folder is already on PATH, so nothing is declared at all
+set PATH=C:\Tools\ScriptLangCore;%PATH%
+myapp.exe</code></pre>
+
+<p><strong>A declared location is obeyed, not consulted.</strong> When nothing is beside the exe and <code>SLC_ENGINE_HOME</code> names a folder with no <code>ScriptLangCore.dll</code>, the launcher exits <code>3</code> naming what it was told and what it did not find, rather than falling back to another copy: a typo must not load a different engine than the one you named, which is the failure mode that would be hardest to notice. <code>SLC_ENGINE_DLL</code> naming a missing file is refused the same way. When the engine came from anywhere but the exe's own folder, one line on stderr says which one answered (<code>launcher: engine from C:\Tools\ScriptLangCore\ScriptLangCore.dll</code>), next to the version line.</p>
+
+<h3>One interpreter per session, and it is the one running</h3>
+<p>A session runs a script on the interpreter it ADOPTED, so <code>slc_main</code> with a <code>.slc</code> behaves exactly
+like <code>.run</code> in a REPL: the file's declarations, its script classes, its bundle exports, its <code>./</code>
+relative paths and <code>Application.SingleInstance</code>'s lock all belong to the one interpreter that is running. That is
+not an implementation detail a host has to know, but it is why a 526-suite corpus behaves identically through the launcher
+and from the command line: a SECOND interpreter in one process inherits its namespaces from the engine's blueprint, and a
+namespace member keeps the interpreter that registered it, so the two disagree about every per-run table. Measured on the
+corpus before this was fixed: <code>Bytecode.ExportScript</code> reported "entry function 'f' is not VM-compiled",
+<code>Sqlite.Query&lt;T&gt;</code> answered "Class 'X' not found", <code>./x</code> had no current directory, and a second
+process never saw the single-instance lock.</p>
+
+<h3>The launcher carries the engine's manifest</h3>
+<p>The launcher embeds the same <code>app.manifest</code> the engine's exe carries, because a payload runs as THIS process:
+the Common-Controls v6 assembly dependency (which is what registers <code>SysLink</code> and draws a themed control) and
+PerMonitorV2 awareness have to be this image's. Without it a UI script fails with
+<code>CreateWindowEx for 'SysLink' failed: 1407</code> through the launcher while the same script works from the CLI.</p>
+
+<p><strong>The engine's folder becomes the session's home</strong> , which is what makes a shared engine work: <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> live with the DLL it was published beside. One consequence is worth stating because it is visible from a script: <code>Application.Path</code> reports that folder, so a run against <code>C:\Tools\ScriptLangCore</code> answers <code>Application.Path = C:\Tools\ScriptLangCore</code> even though the exe is elsewhere. A packaged app's own files are still found beside the APP, through <code>./</code> and <code>Script.Directory()</code>, which name the exe's folder.</p>
+
+<h2 id="managed">Embedding from C# and .NET</h2>
+<p>Nothing here is C-specific: the ABI is fifteen plain exports, so a managed host binds them with <code>NativeLibrary</code> and delegates, and needs no generated interop. This is the whole of it, and it prints <code>engine: ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 2</code>, <code>status: 0</code>, the script's two lines and its outcome JSON:</p>
+
+<pre><code>using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+// A .NET host: load the DLL once, create one session, point the sinks at this process, run, read the outcome, release.
+// Every export is a plain C ABI, so `NativeLibrary.GetExport` IS the binding, and no generated marshalling is needed.
+var lib = NativeLibrary.Load(System.IO.Path.Combine(AppContext.BaseDirectory, "ScriptLangCore.dll"));
+
+T Export&lt;T&gt;(string name) =&gt; Marshal.GetDelegateForFunctionPointer&lt;T&gt;(NativeLibrary.GetExport(lib, name));
+
+var version = Export&lt;VersionFn&gt;("slc_version");
+var create = Export&lt;CreateFn&gt;("slc_create");
+var free = Export&lt;FreeFn&gt;("slc_free");
+var runText = Export&lt;RunTextFn&gt;("slc_run_text");
+var setOutput = Export&lt;SetOutputFn&gt;("slc_set_output");
+var lastResult = Export&lt;MeasureFn&gt;("slc_last_result");
+
+Console.WriteLine($"engine: {ReadVersion(version)}");
+var handle = create(IntPtr.Zero);                      // null options: default thread mode, home = this folder
+Console.WriteLine($"session: {handle}");
+
+// Output arrives as UTF-8 lines with a channel: 0 is the script's stdout, 1 is the engine's log.
+var lines = new List&lt;string&gt;();
+LineCb sink = (h, channel, utf8, user) =&gt; lines.Add($"{channel}|{Marshal.PtrToStringUTF8(utf8)}");
+setOutput(handle, Marshal.GetFunctionPointerForDelegate(sink), IntPtr.Zero);
+
+var status = runText(handle, Utf8("print('hello from a script');\nint Twice(int n) { return n * 2; }\nprint('twice: ' + Twice(21));"), IntPtr.Zero);
+Console.WriteLine($"status: {status}");
+foreach (var line in lines) Console.WriteLine($"  {line}");
+Console.WriteLine($"outcome: {Ask(lastResult, handle)}");
+Console.WriteLine($"free: {free(handle)}");
+GC.KeepAlive(sink);                                    // the callback must outlive the calls: the one lifetime rule
+
+IntPtr Utf8(string s) =&gt; Marshal.StringToCoTaskMemUTF8(s);
+
+static string ReadVersion(VersionFn call)
+{
+    var needed = call(IntPtr.Zero, 0);
+    var buffer = Marshal.AllocCoTaskMem(needed + 1);
+    try { call(buffer, needed + 1); return Marshal.PtrToStringUTF8(buffer) ?? ""; }
+    finally { Marshal.FreeCoTaskMem(buffer); }
+}
+
+static string Ask(MeasureFn measure, long handle)
+{
+    var needed = measure(handle, IntPtr.Zero, 0);
+    if (needed &lt;= 0) return "";
+    var buffer = Marshal.AllocCoTaskMem(needed + 1);
+    try { measure(handle, buffer, needed + 1); return Marshal.PtrToStringUTF8(buffer) ?? ""; }
+    finally { Marshal.FreeCoTaskMem(buffer); }
+}
+
+delegate long CreateFn(IntPtr optionsJson);
+delegate int FreeFn(long handle);
+delegate int RunTextFn(long handle, IntPtr source, IntPtr name);
+delegate int SetOutputFn(long handle, IntPtr callback, IntPtr user);
+delegate int MeasureFn(long handle, IntPtr buffer, int capacity);
+delegate int VersionFn(IntPtr buffer, int capacity);   // slc_version takes no handle
+delegate void LineCb(long handle, int channel, IntPtr utf8, IntPtr user);</code></pre>
+
+<p>Three details decide whether a managed host works first time. The DLL must be findable: a published host keeps <code>ScriptLangCore.dll</code> beside its own exe, which is what <code>AppContext.BaseDirectory</code> names (under <code>dotnet run</code> that is <code>bin\&lt;config&gt;\&lt;tfm&gt;\</code>, so copy the DLL there while experimenting). The output callback is a DELEGATE the runtime marshals, so it must outlive the calls that use it, which is why the sample keeps it in a local and calls <code>GC.KeepAlive</code>; a callback collected mid-run is a crash, not an error. And nothing throws across the boundary: a script's failure comes back as a status plus the outcome JSON from <code>slc_last_result</code>, so a host reads verdicts rather than catching exceptions.</p>
+
+<p>The full working host is <code>src/embed/Program.cs</code> in this repository: about sixty checks that exercise every export, including <code>slc_main</code>, the bytes verb, cancellation and the free-while-running refusal. When a question is not answered on this page, that file is the reference.</p>
+
+<div class="note"><strong>A session is per host, and the free matters.</strong> <code>slc_create</code> hands back a handle and <code>slc_free</code> releases the session, its interpreter and its feeds; a host that creates one session for its lifetime and frees it at shutdown has nothing else to do. Handles are never reused, so a stale one answers a refusal naming it instead of reaching another session, and <code>slc_free</code> refuses while a run is in flight rather than abandoning it mid-statement.</div>
+<h2 id="sqlite">SQLite as a third door</h2>
+
+<p>The same <code>ScriptLangCore.dll</code> is also a SQLite loadable extension, so a database can call script code from SQL. There is no separate artifact to build: the <code>Embed</code> configuration exports the entry point beside the sixteen <code>slc_*</code> verbs, and registers six functions.</p>
+
+<pre><code>sqlite&gt; .load ./ScriptLangCore init
+sqlite&gt; select slc_eval('a0 + a1', 2, 3);
+{"HasError":false,"ExitCode":0,"ReturnValue":5}
+sqlite&gt; select json_extract(slc_eval('a0 * 2', 21), '$.ReturnValue');
+42</code></pre>
+
+    <div class="note"><strong>The prompts are the shell's, not SQL, and 3.54 changed them.</strong> The blocks below use
+    the classic pair, <code>sqlite&gt; </code> and <code>   ...&gt; </code> for a statement continued on the next line.
+    Starting with <strong>SQLite 3.54</strong> the continuation prompt shows <em>the characters still needed to close the
+    statement</em> instead of a fixed <code>...&gt;</code>, so a statement that only lacks its semicolon is met with
+    <code>;-&gt; </code> (and one open parenthesis with <code>);-&gt; </code>), while the main prompt now carries the
+    application and version. Both are cosmetic: nothing in them is typed. To pin the pair these examples show, for the
+    session:
+    <pre><code>sqlite&gt; .prompt 'sqlite&gt; ' '   ...&gt; '</code></pre>
+    or for every session, before the shell starts (3.54 and newer):
+    <pre><code>export SQLITE_PS1='sqlite&gt; '
+export SQLITE_PS2='   ...&gt; '</code></pre>
+    <code>.prompt</code> with two strings works in every shell; on 3.54 and newer <code>.prompt --show</code> also prints
+    the pair currently in use, and an older shell does not report that flag, so set rather than inspect below 3.54. The
+    escape codes the new defaults are built from (<code>/C</code> for the closing characters, <code>/B</code> for the
+    padding) are listed on <a href="https://sqlite.org/cliprompt.html">sqlite.org/cliprompt.html</a>.
+    </div>
+
+<p><strong>Three entry-point names, and the third one is for COM.</strong> <code>init</code> is the short one the examples use. <code>sqlite3_scriptlangcore_init</code> is the name SQLite DERIVES when no entry point is given (the basename, without its extension, without a leading <code>lib</code>, lowercased), which is what makes a bare <code>.load ./ScriptLangCore</code> work; the two land on the same body. <code>init_sta</code> is that same body with one step in front of it: it makes the <em>calling thread</em> the main STA, which is what a script that drives COM needs.</p>
+
+<pre><code>sqlite&gt; .load ./ScriptLangCore init_sta
+sqlite&gt; select json_extract(slc_file('D:/rules/sheet.slc'), '$.ReturnValue');</code></pre>
+
+<p>Why it is a separate name rather than a flag: SQLite fixes the entry point's signature, so there is no argument to carry a flag, and choosing the name IS the opt-in. Why it is needed at all: the shell's own thread never initialized COM, so Windows reports an implicit MTA apartment for it and a COM call there is refused with <code>COM Automation requires an STA thread</code>. A thread that never chose an apartment can still become one, which is why <code>OleInitialize</code> succeeds on it and the same script then answers; a thread whose host <strong>did</strong> choose MTA cannot be converted, and <code>init_sta</code> refuses it by name. The cost is the host's own thread, so it is stated rather than buried: after this load that thread is the main STA for the rest of its life, and a host that later asks for MTA on it gets <code>RPC_E_CHANGED_MODE</code>. A connection that only evaluates expressions pays nothing and should keep using <code>init</code>.</p>
+
+<p><strong>A worked payload for <code>init_sta</code></strong> is <code>assets/language/sqlite/excel_matrix_roundtrip.slc</code>: it builds a matrix of ints, doubles, decimals, dates and text, writes it into one Excel range with a <code>SUBTOTAL</code> formula under it, reads the whole range back, creates an SQLite table and inserts every row, then answers that table with SELECTs that compare its <code>SUM</code> against Excel's own subtotal. Its answer is one object holding the verdict and the whole matrix, which is how a caller reads a payload whose <code>print</code> this door discards.</p>
+
+<h3>The answer is always the run's result, as JSON</h3>
+<p><code>slc_eval(code, a0, a1, ...)</code> evaluates one script expression and answers <code>Json.Serialize</code> of the run's result, which is the same value <code>RunScript</code> gives a script. A caller reads what it needs from it:</p>
+
+<pre><code>{"HasError":false,"ExitCode":0,"ReturnValue":5}
+{"HasError":true,"ExitCode":0,"ErrorMessage":"Undefined variable 'nope'",
+ "ErrorInfo":{"Code":101,"Message":"Undefined variable 'nope'"},
+ "ErrorLine":1,"ErrorColumn":5,"StackTrace":"..."}</code></pre>
+
+<p>A script that fails is a <strong>result</strong> and never a SQL error, so a query over many rows keeps its rows and reports the failures per row. The extension's own failures are different and they are SQL errors: no code argument at all, a session that went missing, or re-entrancy past the guard. A code text that does not parse is a result too, with its message and position, because the caller wrote it and a refusal reads better than a broken statement.</p>
+
+<p>SQLite reads JSON natively, so the value stays usable: <code>json_extract(..., '$.ReturnValue')</code> hands back a typed scalar or a nested document, and <code>json_type</code> says what arrived. One consequence is worth knowing before writing a <code>WHERE</code> clause: the function answers TEXT, and SQLite orders every TEXT above every number, so <code>slc_eval(...) &gt; 3</code> is not the comparison it looks like. Extract first, and compare the extracted value.</p>
+
+<p><strong>A JSON boolean comes back as the INTEGER 1 or 0, and that is <code>json_extract</code>, not the engine.</strong> The result is a JSON document with real booleans in it (<code>{"HasError":false,"ExitCode":0,"ReturnValue":true}</code>), and SQLite has no boolean storage class, so its JSON functions map one onto a number when they hand a value to SQL. The full mapping, as the shell prints it:</p>
+
+<pre><code>json_extract('{"b":true}',  '$.b')   1      integer     json_type: true
+json_extract('{"b":false}', '$.b')   0      integer     json_type: false
+json_extract('{"s":"x"}',   '$.s')   x      text
+json_extract('{"n":1.5}',   '$.n')   1.5    real
+json_extract('{"a":[1,2]}', '$.a')   [1,2]  text        an array or an object travels as its JSON text
+json_extract('{"z":null}',  '$.z')   (null) NULL</code></pre>
+
+<p>So <code>1</code> in a result cell is not a corrupted value. When the boolean itself matters there are three spellings, and the first one is the one to reach for: <code>json_type(x, '$.ReturnValue')</code> answers the word <code>true</code> or <code>false</code>, the <code>-&gt;</code> operator answers the JSON text (<code>true</code>, a TEXT value), and comparing what <code>json_extract</code> gave you (<code>= 1</code>) is the numeric reading, which is fine as long as nothing else in that column can be <code>1</code> for a different reason.</p>
+
+<div class="note"><strong>The verdict is <code>ExitCode</code>, and <code>ReturnValue</code> is what the file answered.</strong> They are different questions. A file answers with its top-level <code>return &lt;value&gt;</code> when it has one, and otherwise with its last top-level expression statement, so a suite that ends in <code>CheckSummary(); exit(CheckFailed());</code> answers <code>{"HasError":false,"ExitCode":0,"ReturnValue":true}</code> when every check passed: <code>exit</code> ends the run before a value is left, and the summary's own flag is the last one that was. Read <code>$.ExitCode</code> for "did the run pass" and <code>$.HasError</code> for "did it refuse to run", and treat <code>ReturnValue</code> as the file's own answer. That answer can be a whole document: a script that records each step in a class instance and ends with <code>return log;</code> hands the caller one object, which a query walks with <code>json_each</code> (<code>select value from json_each(slc_file(path), '$.ReturnValue.Steps') where json_extract(value, '$.State') = 'failed'</code>). Printing the whole document (<code>select slc_file(...)</code>) is also the quickest way to see a value you did not expect, since <code>json_extract</code> has already converted it by the time you read a single field.</div>
+
+<h3>Arguments arrive as a0, a1, ...</h3>
+<p>Nothing is spliced into source text. The SQL arguments after the code are bound as the globals <code>a0</code>, <code>a1</code> and so on, mapped by their SQL type: integer to <code>long</code>, real to <code>double</code>, text to <code>string</code>, blob to a byte array, NULL to <code>null</code>. A list or a dictionary travels as JSON text and is read back with <code>Json.Parse</code>:</p>
+
+<pre><code>sqlite&gt; select slc_eval('a0.Length', 'hello');
+{"HasError":false,"ExitCode":0,"ReturnValue":5}
+sqlite&gt; select slc_eval('{n: a0, s: a1}', 7, 'two');
+{"HasError":false,"ExitCode":0,"ReturnValue":{"n":7,"s":"two"}}
+sqlite&gt; select slc_eval('Json.Parse(a0).Count()', '[1,2,3]');
+{"HasError":false,"ExitCode":0,"ReturnValue":3}</code></pre>
+
+<h3>The scalar form, when a value is what you want</h3>
+<p><code>slc_eval_scalar(code, a0)</code> answers the run's value as a NATIVE SQL value, which is what a <code>WHERE</code> clause, an <code>ORDER BY</code>, a <code>sum()</code> or a column that stores a number needs. A failing run becomes a SQL error here rather than a JSON envelope, because a scalar answer has nowhere to put the failure; the message still names the position. The benefit is the type, not the speed: measured over ten thousand rows the two forms differ by about four percent, because what a row costs is the script's own evaluation and not the envelope around it.</p>
+<p>The argument count is part of each function's registration, so <code>pragma_function_list</code> reports the truth and SQLite refuses a wrong count at prepare time (<code>wrong number of arguments to function slc_map()</code>), which is what keeps an extra argument from being silently ignored: a fixed four (<code>slc_file</code> 1, <code>slc_map</code> 2, <code>slc_agg</code> 2, <code>slc_eval_scalar</code> 2) and a variadic two (<code>slc_eval</code>, <code>slc_map_agg</code>, reported as <code>-1</code>, whose count is the caller's).</p>
+
+<pre><code>sqlite&gt; select slc_eval_scalar('a0 * 2', 21), typeof(slc_eval_scalar('a0 * 2', 21));
+42|integer</code></pre>
+
+<p>Values map by their script type. A number arrives as integer or real, text and character as text, a byte array as a blob, <code>null</code> as NULL, and a type SQL has no equivalent for (a DateTime, a list, a class instance) becomes text through the engine's own display rule, so a caller sees what a script would print rather than a CLR name.</p>
+
+<h3>Folds: slc_agg</h3>
+<p><code>slc_agg(code, value)</code> is an aggregate, and one is enough to express any fold, which is why there is no min/max/sum family to keep in step. Per row the code is evaluated with <code>a0</code> the running state and <code>a1</code> the row's value, and its answer becomes the new state; the final state is the result. On the first row <code>a0</code> is NULL, so a fold starts from a default it states itself. A default can also be passed as another argument, which keeps the quoting out of the expression:</p>
+
+<pre><code>sqlite&gt; with recursive t(n) as (select 1 union all select n+1 from t where n&lt;5)
+   ...&gt; select slc_agg('(a0 ?? 0) + a1', n) from t;
+15
+sqlite&gt; with t(s) as (values ('a'),('b'),('c'))
+   ...&gt; select slc_agg('(a0 ?? a2) + a1', s, '') from t;
+abc</code></pre>
+
+<p>An aggregate that sees no rows answers NULL, and a step that fails aborts the statement with the script's own message.</p>
+
+<h3>A set at a time: slc_map and slc_map_agg</h3>
+<p>Two spellings of the same answers, because the rows reach them differently. <code>slc_map(code, rows)</code> takes a JSON ARRAY and needs no query at all, which is what you want for a document you already hold. <code>slc_map_agg(code, a0, a1, ...)</code> is an aggregate, so the rows arrive from a table and the arguments are spelled the way <code>slc_eval</code> spells them. Both answer a JSON array of values.</p>
+
+<pre><code>sqlite&gt; select slc_map('a0 * a0', '[1,2,3,4]');
+[1,4,9,16]
+sqlite&gt; with t(n) as (values (1),(2),(3)) select slc_map_agg('a0 * a0', n) from t;
+[1,4,9]
+sqlite&gt; with t(a,b) as (values (1,10),(2,20)) select slc_map_agg('a0 + a1', a, b) from t;
+[11,22]
+sqlite&gt; with t(n) as (values (2),(3))
+   ...&gt; select key, json_extract(value, '$.sq')
+   ...&gt; from json_each((select slc_map_agg('{n: a0, sq: a0*a0}', n) from t));
+0|4
+1|9</code></pre>
+
+<p>For the JSON form an element that is itself an array supplies the arguments in order, and any other element supplies <code>a0</code> alone, so <code>json_group_array(n)</code> can be handed straight in. A row that fails raises a SQL error naming its position, and a set whose rows disagree about how many arguments they supply is refused by name, because one call reads one shape of row. An empty or NULL set answers <code>[]</code>, and the aggregate evaluates nothing until it ends, so a failing row is reported once with its index.</p>
+
+<h3 id="sqlite-which-door">Which door for a big set</h3>
+<p>Measured over one hundred thousand rows held in a table, three passes each, on the shipped <code>Embed</code> DLL, timed by the shell's <code>.timer</code>. The control and the last row show how much of a set door is SQLite's own array work:</p>
+
+<pre><code>sum(n*n)                                          4 / 4 / 4 ms        no engine at all
+sum(slc_eval_scalar('a0*a0', n))                 91 / 98 / 84 ms     one call a row, no JSON
+slc_agg('(a0 ?? 0) + a1 * a1', n)               109 / 131 / 107 ms   one call a row, folded
+length(slc_map_agg('a0*a0', n))                 111 / 123 / 237 ms   the set, no unnest
+sum(value) ... slc_map_agg, then json_each       131 / 126 / 224 ms   the set, read back as rows
+length(slc_map('a0*a0', json_group_array(n)))    136 / 125 / 241 ms   the same through a JSON array
+sum(value) ... slc_map, then json_each           150 / 141 / 218 ms   the same, read back
+sum(json_extract(slc_eval('a0*a0', n), ...))     202 / 222 / 200 ms   one envelope a row
+  build the array in SQL, then read it            15 / 15 / 23 ms     SQLite's own floor</code></pre>
+
+<p>Three conclusions, and the first reverses the obvious reading. A VALUE per row is the cheapest door there is (<code>slc_eval_scalar</code>, about 0.84 microseconds a row), so when what you need is a number, the per-row scalar function beats both set doors. The ENVELOPE is what costs, about 2.4 times the scalar door, because each row serializes a whole <code>ScriptResult</code>; it is worth that when a caller needs the failure fields of the row. And the set doors sit between them at 1.1 to 1.4 microseconds a row: <code>slc_map_agg</code> leads <code>slc_map</code> by about ten percent because it never builds the intermediate JSON text, which is the reason it exists. So choose by the shape of what you have rather than by the table: <code>slc_map_agg</code> when the rows are in a table and the SQL side is one expression, <code>slc_map</code> when what you have is already a JSON document, <code>slc_eval_scalar</code> when the answers are values you consume as rows, and <code>slc_eval</code> when each row's failure matters.</p>
+
+<div class="note"><strong>The JSON1 rules this door leans on.</strong> <code>json_group_array</code> keeps NULL inputs in the array and answers <code>[]</code> when it saw no rows, which is why an empty or NULL set answers <code>[]</code> here rather than a refusal. A BLOB cannot be put into a JSON array at all (<code>json_group_array(x'01')</code> is "JSON cannot hold BLOB values"), so encode a binary column first if it is part of the set. A JSONB value is a BLOB, so a set that is already JSONB needs the <code>json()</code> wrapper: <code>slc_map(code, json(rows))</code>, and <code>json(jsonb_group_array(n))</code> is the JSONB-building aggregate read back as text. <code>json_each</code> answers a <code>key</code> that is the array index, a <code>type</code>, and a <code>value</code> that is the SQL value for a primitive and the JSON TEXT for an object or an array, which is why a field of an answer is read with <code>json_extract(value, '$.field')</code>.</div>
+
+<h3>Loading a file: slc_file</h3>
+<p><code>slc_file(path)</code> runs a script FILE in this connection's interpreter and answers the run as JSON, so a schema can carry its logic instead of one expression. Its functions stay callable from the other three afterwards, which is what removes the need for a registration ceremony of its own:</p>
+
+<pre><code>sqlite&gt; select json_extract(slc_file('D:/rules/grades.slc'), '$.HasError');
+0
+sqlite&gt; select slc_eval_scalar('Grade(a0)', score) from results;</code></pre>
+
+<p>The path is resolved against the process directory, which is the only directory a SQL host has, and the file's own REPL dot commands are stripped, so it behaves as it does from the command line.</p>
+<p>A path holding a <strong>compiled bundle</strong> is run through the same door, and the answer is decided by the file's <strong>content</strong> (the bundle magic in its first four bytes) rather than by its extension, so <code>slc_file('D:/rules/grades.slcbc')</code> answers what <code>slc_file('D:/rules/grades.slc')</code> answers. That includes the run's verdict: a script that sets <code>exitcode</code> reports it either way, so <code>$.ExitCode</code> answers the same number from a bundle as from its source. A program bundle works whether it carries its source or was stripped with <code>--source=strip</code>: the source it carries is run, and a source-less one runs its compiled entry in the connection's interpreter, so its functions are callable afterwards exactly as a source file's are. A <strong>library</strong> blob names no entry and is refused by name (<code>this library names no entry, so load it with import or .loadslcbc</code>), which is the one shape this door cannot run.</p>
+
+<p><strong>What the file answers</strong> is its top-level <code>return &lt;value&gt;</code>, and otherwise the value of its <strong>last top-level expression statement</strong>. So the shape that makes a file a callable unit with data coming back is: declare the functions, then end with either <code>return</code> and the value you want, or the call whose answer you want.</p>
+
+<pre><code>-- D:/rules/box.slc:  class Point { public int X; public int Y; }
+--                     object Build() { var p = new Point(); p.X = 3; p.Y = 4; return p; }
+--                     Build();          -- the last statement is what the run answers
+sqlite&gt; select slc_file('D:/rules/box.slc');
+{"HasError":false,"ExitCode":0,"ReturnValue":{"X":3,"Y":4}}
+sqlite&gt; select json_extract(slc_file('D:/rules/box.slc'), '$.ReturnValue.X'),
+   ...&gt;        json_extract(slc_eval('(Build()).Y'), '$.ReturnValue');
+3|4</code></pre>
+
+<p><strong>A script's own <code>print</code> is DISCARDED on this door.</strong> The interpreter behind <code>slc_file</code> has a null output sink, so the SQL result stream stays clean and the JSON answer stays parseable: measured, a file printing two lines and exiting 7 answered <code>{"HasError":false,"ExitCode":7}</code> and nothing else, while the same file run from the CLI printed both lines. Write what a reader must see into the run's own answer (<code>return &lt;value&gt;</code>) or into a file the script owns, and read it back in SQL; a tool that reports progress by printing must write through <code>Console.Out</code> instead of <code>print</code>.</p><p>Two details decide what a reader sees. A file that only DECLARES things (classes, functions, no call) answers <code>{"HasError":false,"ExitCode":0}</code> with <strong>no <code>ReturnValue</code> member at all</strong>, and a last statement whose value is <code>null</code> reads the same way, so <code>json_type(... , '$.ReturnValue')</code> is the honest test rather than a comparison with <code>null</code>. And the object travels through the engine's JSON writer, so a class instance arrives as its fields, a dictionary literal as a document, and a list as an array: that is the door to a serialized type from SQL.</p>
+
+<p><strong>A run that reported checks answers with their report.</strong> A subject written as a suite
+(<code>Check("...", cond)</code>) reports <code>Passed</code>, <code>Failed</code> and the failing labels with their positions in
+<code>ReturnValue</code>, with the value the run ended with inside it as <code>Answer</code> (a top-level <code>return</code>) or <code>Echo</code> (its last expression statement), because the alternative was the
+value of the last call, which for <code>CheckSummary()</code> is a bare <code>false</code>:</p>
+
+<pre><code>sqlite&gt; select json_extract(j,'$.ReturnValue.Failed'), json_extract(j,'$.ReturnValue.Checks[0].Label'),
+   ...&gt;        json_extract(j,'$.ExitCode') from (select slc_file('D:/rules/suite.slc') as j);
+1|this test will fail|1</code></pre>
+
+<p>That is the same report an embedding host reads in <code>slc_last_result</code>'s <code>Checks</code>, so a suite's verdict is
+actionable through either door without anyone parsing the console text.</p>
+
+<p>The same run from a SCRIPT is <code>RunScript(path, true)</code>, and its <code>.ReturnValue</code> is that identical value, with <code>Json.Serialize(result)</code> producing byte for byte the text <code>slc_file</code> answers. The difference is scope: <code>RunScript</code> runs in an isolated interpreter by default, so the file's functions do not stay callable in the caller, while <code>slc_file</code> runs in the connection's interpreter and they do. Pass <code>preserveContext: true</code> to <code>RunScript</code> when the caller wants the same.</p>
+
+<p><strong>Load once, then call.</strong> <code>slc_file</code> re-reads, re-parses and re-compiles the file on EVERY call, because the file may have changed, so it is a loader and not a per-row door: measured, one run allocates about 165 KB for a 120-byte file and 12 MB for a 7 KB file declaring 200 functions, against about 18 KB for a call into a function the file already declared. A loop of <code>slc_file</code> therefore makes the process' committed memory climb to the high-water mark of that churn (the engine retains nothing: live managed memory stays at about 455 KB, and a full collection measures 0 bytes of growth per call over 15,000 calls, while the committed segments are not handed back to the OS). One <code>slc_file</code> per connection and then <code>slc_eval</code>/<code>slc_eval_scalar</code> over its functions is both the cheap shape and the one a schema wants.</p>
+
+<h3>JSONB comes for free</h3>
+<p>SQLite converts JSON text to its binary form itself, so the JSONB variant of this function is the SQL spelling <code>jsonb(slc_eval(...))</code> and needs nothing from the engine. Measured over ten thousand rows, the conversion is inside the noise of the run itself (228 and 236 ms against 236 and 232 ms), the binary form is about a quarter smaller for a small document (96 bytes of text against 71 of blob), and <code>json_extract</code> and <code>-&gt;&gt;</code> read both identically. A <code>slc_eval_jsonb</code> inside the engine would be worse than this: the binary layout is internal to SQLite and version-coupled, so building one from C# either hand-writes that layout or re-enters SQLite with a prepared statement per row.</p>
+
+<h3>What the function is registered as, and why</h3>
+<p><code>slc_eval</code> is registered with <code>SQLITE_DIRECTONLY</code> and without <code>SQLITE_DETERMINISTIC</code>. The first is not optional here: this language starts processes, reads files, drives COM and opens sockets, so without it a database file could ship a view, a trigger or a generated column that runs script code the moment a client opens it. Only a statement the application itself writes may call the function. The second is left off because an expression may read a clock or a file, and the planner must not assume otherwise.</p>
+
+<p>A host older than SQLite 3.31 has no <code>SQLITE_DIRECTONLY</code>, and registering there would succeed while losing the guard, so the load is refused by version instead.</p>
+
+<h3>Lifetime, threads and output</h3>
+<p>Each connection owns one interpreter, carried as the function's application pointer and released by <code>sqlite3_create_function_v2</code>'s destructor when the connection closes, so no session outlives its connection and none is keyed on a handle. Calls re-enter freely up to sixteen deep, which is what a scalar subquery or a view calling the function needs. The expression's <code>print</code> output is discarded, because a SQL function's answer is its result and a host's console has no line for a script to land on; the engine's own log still reaches the host's standard error.</p>
+
+<p>A SQLite function runs on whatever thread the host calls it from, and the interpreter is created on that thread. A host that shares one connection between threads therefore shares the interpreter, which is the same rule the C ABI states: one call at a time per session.</p>
+
+<h3>What a row costs</h3>
+<p>The code text becomes the body of a callable once per distinct (code, argument count), and a row is then a CALL: no parse, no compile, no run setup. A hundred thousand rows, three passes each, best shown, on the shipped <code>Embed</code> DLL:</p>
+
+<pre><code>sum(slc_eval_scalar('a0*a0', n))                                84 ms   0.84 us a row
+sum(json_extract(slc_eval('a0*a0', n), '$.ReturnValue'))       200 ms   2.00 us a row
+sum(json_extract(jsonb(slc_eval('a0*a0', n)), '$.ReturnValue')) 206 ms  2.06 us a row</code></pre>
+
+<p>So a value per row is about 0.84 microseconds and a whole envelope is about 2.0, and the JSONB conversion between the first two lines sits inside the noise. Most of the remaining cost is the engine's own call: measured in a script loop, one script call is about 0.59 microseconds, its argument pool, local frame pool and return coercion included. The code text is decoded once per statement while it does not change, so a repeated code is the fast path: a code that changes on every row costs about fifteen percent more, which is the decode and the cache key it forces.</p>
+
+<div class="note"><strong>Positions are the ones in your own text.</strong> Because the expression is wrapped as a lambda internally, a failure could have named a column shifted by the wrapper; it does not, and a mistake reports the line and column you would point at in the code you passed.</div>
+
+<h3>Verifying it yourself</h3>
+<pre><code>sqlite3&gt; .load D:/path/to/publish-dll/ScriptLangCore init
+sqlite3&gt; select name, narg from pragma_function_list where name = 'slc_eval';</code></pre>
+
+<p><code>.load FILE</code> with no entry point also works, and then SQLite looks for the derived name. If it answers <code>no such function</code>, spell the entry point: <code>.load FILE init</code>.</p>
+
+<p>The engine can host it too, which is the shortest self-test on a machine that has no SQLite shell to hand:</p>
+
+<pre><code>var lib = LoadLibrary("sqlite3");
+var db = Sqlite.OpenDb(":memory:");
+print(Sqlite.LoadExtensions(lib, db, "D:/path/to/publish-dll/ScriptLangCore.dll"));
+foreach (var row in Sqlite.Query(lib, db, "select slc_eval('a0 + a1', 2, 3) as j")) {
+    print(row["j"]);
+}</code></pre>
+
+<h3>The indices behind the entry point</h3>
+<p>SQLite hands an extension a table of function pointers, and calling the wrong entry in it is memory corruption rather than an error. The positions the engine uses are taken from <code>offsetof</code> against <code>tools/SqliteExt/sqlite3ext.h</code>, not from counting the struct by eye: a member whose parameters are function pointers, and a parenthesised comment, both fool a text pass, and the first version of this file proved it by reading a version string out of an integer. On top of that, every load resolves each routine by NAME from the host's own exports when the host exports them, and refuses the load when the name and the index disagree. A host that links SQLite statically exports nothing and is served from the table alone, which is why the load's first call is <code>libversion</code>: its answer must read as a version, or the load is refused instead of trusting the table.</p>
+
+<div class="note"><strong>What this door does not do.</strong> There is no table-valued function: one scalar, one scalar-as-value, one fold, one file loader and two set maps, because those are the parts an application needs to put logic next to its data, and a virtual table is a much larger surface. A script evaluated this way also runs with the permissions of the host process, so a database that arrives from elsewhere should not be able to add columns that call it, which is what <code>SQLITE_DIRECTONLY</code> enforces and why the flag is not configurable. Measured, that refusal is exact per shape: an expression index, a <code>CHECK</code> constraint and a generated column are refused at CREATE, while a VIEW, a TRIGGER and a <code>DEFAULT</code> clause are created and refused with <code>unsafe use of slc_eval_scalar()</code> when something reaches them.</div>
+
+<h2 id="hosts">Hosts that are not C: Python, PowerShell, bash</h2>
+<p>The ABI is a C ABI with plain types, so any language with an FFI can drive it, and any host that can talk to SQLite can take the <a href="#sqlite">third door</a> instead. What follows is what each host needs installed before it can load the DLL, what you deploy beside it, and the smallest program that proves the whole path.</p>
+
+<h3>Install these first</h3>
+<table>
+<tr><th>Host</th><th>What the DLL needs from it</th><th>Package to install</th></tr>
+<tr><td><b>Python</b></td><td>A 64-bit CPython 3.x. <code>ctypes</code> and <code>sqlite3</code> ship with it, so nothing else is needed.</td><td>the python.org x64 installer, or <code>winget install Python.Python.3.13</code></td></tr>
+<tr><td><b>PowerShell</b></td><td>Nothing. <code>Add-Type</code> and <code>[DllImport]</code> are in-box, and they are the host's P/Invoke door.</td><td>Windows PowerShell 5.1 ships with Windows; PowerShell 7 is optional (<code>winget install Microsoft.PowerShell</code>)</td></tr>
+<tr><td><b>bash</b></td><td>No FFI at all, so it needs a 64-bit <code>sqlite3</code> command line and takes the SQL door.</td><td>MSYS2: <code>pacman -S mingw-w64-x86_64-sqlite3</code>. Or <code>winget install SQLite.SQLite</code>, which puts <code>sqlite3.exe</code> on <code>PATH</code>.</td></tr>
+</table>
+
+<h3>What you deploy beside the host</h3>
+<p>One folder holding the engine's own layout, which is what <code>compile_aot.bat</code> produces: <code>ScriptLangCore.dll</code> with <code>sqlite3.dll</code>, <code>assets\</code> and <code>tools\</code> next to it. The DLL is 19.7 MB and is the engine itself, not a wrapper. The examples below call that folder <code>C:\apps\engine</code>.</p>
+<div class="note"><strong>Both sides must be 64-bit, and the shell's own bitness says nothing.</strong> The published DLL is x64: a 32-bit host cannot load it (Windows answers 193, "not a valid Win32 application"), and a 32-bit <code>sqlite3</code> refuses the extension with "the specified module could not be found". A 64-bit bash still cannot load a DLL, because bash has no FFI, which is why the bash recipe goes through <code>sqlite3</code>.</div>
+
+<h3>Python: the ABI through <code>ctypes</code></h3>
+<pre><code>import ctypes, json
+
+DLL  = r"C:\apps\engine\ScriptLangCore.dll"
+HOME = r"C:\apps\engine"                    # where the engine's layout lives, see below
+
+dll = ctypes.WinDLL(DLL)                    # ctypes is in the standard library
+dll.slc_version.restype = ctypes.c_int
+dll.slc_version.argtypes = [ctypes.c_char_p, ctypes.c_int]
+buf = ctypes.create_string_buffer(256)
+dll.slc_version(buf, 256)
+print(buf.value.decode())                   # ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 3
+
+dll.slc_create.restype = ctypes.c_longlong
+dll.slc_create.argtypes = [ctypes.c_char_p]
+session = dll.slc_create(json.dumps({"home": HOME}).encode())
+
+OUTPUT = ctypes.CFUNCTYPE(None, ctypes.c_longlong, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
+def on_output(handle, channel, text, user):  # channel 0 is print, 1 is the engine's own log
+    print(channel, text.decode("utf-8", "replace"))
+callback = OUTPUT(on_output)                 # keep it alive for as long as the session lives
+dll.slc_set_output.restype = ctypes.c_int
+dll.slc_set_output.argtypes = [ctypes.c_longlong, ctypes.c_void_p, ctypes.c_void_p]
+dll.slc_set_output(session, ctypes.cast(callback, ctypes.c_void_p), None)
+
+dll.slc_run_text.restype = ctypes.c_int
+dll.slc_run_text.argtypes = [ctypes.c_longlong, ctypes.c_char_p, ctypes.c_char_p]
+dll.slc_run_text(session, b'print("hello from python"); int Twice(int n) { return n * 2; }', b"host.slc")
+
+dll.slc_call.restype = ctypes.c_int         # a declaration of the run stays callable
+dll.slc_call.argtypes = [ctypes.c_longlong, ctypes.c_char_p, ctypes.c_char_p]
+dll.slc_call(session, b"Twice", b"[21]")
+
+dll.slc_last_result.restype = ctypes.c_int  # the verdict, as JSON
+dll.slc_last_result.argtypes = [ctypes.c_longlong, ctypes.c_char_p, ctypes.c_int]
+outcome = ctypes.create_string_buffer(4096)
+dll.slc_last_result(session, outcome, 4096)
+print(outcome.value.decode())               # {"Status":0,"Ok":true,...,"Result":42}
+
+dll.slc_free.restype = ctypes.c_int
+dll.slc_free.argtypes = [ctypes.c_longlong]
+print(dll.slc_free(session))                # 0, and 2 if the handle is freed twice
+</code></pre>
+
+<h3>Python: the SQL door through the <code>sqlite3</code> module</h3>
+<pre><code>import sqlite3
+con = sqlite3.connect(":memory:")
+con.enable_load_extension(True)
+con.load_extension(r"C:\apps\engine\ScriptLangCore.dll")
+print(con.execute("select slc_eval_scalar('a0 * 2', ?)", (21,)).fetchone()[0])              # 42
+print(con.execute("select slc_eval('a0 + a1', 2, 3)").fetchone()[0])                        # the run's result, as JSON
+con.execute("select slc_file(?)", (r"C:\apps\engine\lib.slc",)).fetchone()                   # the file's functions join this connection
+print(con.execute("select slc_eval_scalar('Slug(a0)', 'Hello World!')").fetchone()[0])       # hello-world!
+</code></pre>
+<p>The six functions are described in the <a href="#sqlite">SQLite section</a>: <code>slc_eval</code> answers the run's result as JSON, <code>slc_eval_scalar</code> answers the bare value, <code>slc_file</code> loads a script file into the connection, <code>slc_agg</code> folds, and <code>slc_map</code> and <code>slc_map_agg</code> take a set at a time.</p>
+
+<h3>PowerShell: the ABI through <code>Add-Type</code></h3>
+<pre><code>$dll = 'C:\apps\engine\ScriptLangCore.dll'
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class Slc {
+    public delegate void OutputFn(long handle, int channel, IntPtr text, IntPtr user);
+    public static readonly List&lt;string&gt; Lines = new List&lt;string&gt;();
+    public static readonly OutputFn Callback = OnOutput;      // a COMPILED delegate, held in a field
+    private static string Utf8(IntPtr p) {                    // 5.1 has no Marshal.PtrToStringUTF8
+        if (p == IntPtr.Zero) return "";
+        var bytes = new List&lt;byte&gt;();
+        for (int i = 0; ; i++) { byte b = Marshal.ReadByte(p, i); if (b == 0) break; bytes.Add(b); }
+        return Encoding.UTF8.GetString(bytes.ToArray());
+    }
+    private static void OnOutput(long h, int channel, IntPtr text, IntPtr user) { Lines.Add(channel + "|" + Utf8(text)); }
+    [DllImport(@"$dll")] public static extern int  slc_version(byte[] buffer, int capacity);
+    [DllImport(@"$dll")] public static extern long slc_create(byte[] options);
+    [DllImport(@"$dll")] public static extern int  slc_set_output(long handle, IntPtr callback, IntPtr user);
+    [DllImport(@"$dll")] public static extern int  slc_run_text(long handle, byte[] source, byte[] name);
+    [DllImport(@"$dll")] public static extern int  slc_call(long handle, byte[] name, byte[] argsJson);
+    [DllImport(@"$dll")] public static extern int  slc_last_result(long handle, byte[] buffer, int capacity);
+    [DllImport(@"$dll")] public static extern int  slc_free(long handle);
+    public static byte[] U8(string s) { return Encoding.UTF8.GetBytes(s + "\0"); }
+    public static string Text(byte[] b) { return Utf8(Marshal.UnsafeAddrOfPinnedArrayElement(b, 0)); }
+}
+"@
+$buf = New-Object byte[] 256
+[Slc]::slc_version($buf, 256) | Out-Null
+[Slc]::Text($buf)                                    # ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 3
+
+$h = [Slc]::slc_create([Slc]::U8('{"home":"C:\\apps\\engine"}'))
+[Slc]::slc_set_output($h, [Runtime.InteropServices.Marshal]::GetFunctionPointerForDelegate([Slc]::Callback), [IntPtr]::Zero) | Out-Null
+[Slc]::slc_run_text($h, [Slc]::U8('print("hello from powershell"); int Twice(int n) { return n * 2; }'), [Slc]::U8('ps.slc')) | Out-Null
+[Slc]::slc_call($h, [Slc]::U8('Twice'), [Slc]::U8('[21]')) | Out-Null
+
+$outcome = New-Object byte[] 4096
+[Slc]::slc_last_result($h, $outcome, 4096) | Out-Null
+[Slc]::Text($outcome)                                # {"Status":0,"Ok":true,...,"Result":42}
+
+[Slc]::slc_free($h) | Out-Null
+[Slc]::Lines                                         # 0|hello from powershell
+</code></pre>
+<div class="note"><strong>The output callback must be a compiled delegate.</strong> A callback cast from a scriptblock kills the process silently at the first <code>print</code>: the shell exits with code 5 and says nothing, so the C# half is not ceremony. And Windows PowerShell 5.1 has no <code>Marshal.PtrToStringUTF8</code>, which is why the sample reads the UTF-8 bytes up to the terminator; on PowerShell 7 that call exists and can be used directly.</div>
+
+<h3>bash: the SQL door, because bash has no FFI</h3>
+<pre><code>SQLITE=/mingw64/bin/sqlite3                     # the x64 build: see the note under this sample
+$SQLITE :memory: ".load 'C:/apps/engine/ScriptLangCore.dll'" "select slc_eval_scalar('a0 * 2', 21);"
+# 42
+
+$SQLITE :memory: \
+  ".load 'C:/apps/engine/ScriptLangCore.dll'" \
+  "select 'fold ' || slc_agg('a0 == null ? a1 : a0 + a1', v) from (select 3 as v union all select 4 union all select 5);" \
+  "select 'map  ' || slc_map('a0 * 10', '[1,2,3]');"
+# fold 12
+# map  [10,20,30]
+</code></pre>
+<div class="note"><strong>Use the 64-bit <code>sqlite3</code>, and name it by its full path.</strong> MSYS2 keeps the 32-bit CLI in <code>/mingw32/bin</code> and the 64-bit one in <code>/mingw64/bin</code>, and on a machine where both exist the 32-bit one is often the one on <code>PATH</code>. Loading the DLL through it answers "the specified module could not be found" and then <code>no such function: slc_eval_scalar</code>, which reads like a missing extension. A refused expression exits <code>sqlite3</code> with status 1 and prints the engine's own sentence, for instance <code>Runtime error near line 2: Cannot convert 'not a number' to number (at line 1, column 4)</code>. You do not have to install anything if an official 64-bit <code>sqlite3.exe</code> is already beside the DLL: copying its two files into the deployment folder works, and the path in the sample is then <code>/c/apps/engine/sqlite3.exe</code>.</div>
+
+<h3>Three things a host must say, and what a host cannot do</h3>
+<ol>
+<li><b>Where the engine lives.</b> Without it, <code>Application.Path</code> is the HOST's own folder: <code>slc_create({"home": "C:\\apps\\engine"})</code> makes it the DLL's folder, which is where <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> must be found. A script that reads a file next to itself, or calls <code>Sqlite</code>, needs this.</li>
+<li><b>That it wants the output.</b> <code>print</code> and the engine's log reach a host only through the <code>slc_set_output</code> callback; with no callback those lines are dropped, which is what the SQL door always does, because a SQL function's answer is its result.</li>
+<li><b>A terminated statement.</b> <code>slc_run_text</code> takes source text, and a statement needs its <code>;</code>: <code>print("hi")</code> is refused with <code>Expect ';' after expression</code>, the same rule a piped REPL line follows.</li>
+</ol>
+<p>A host that loads the DLL also inherits the engine's process-wide facts, the same ones the <a href="#limits">limits</a> section states for C: one GC and one crash domain, a session per thread, and a run inside a native call that cannot be interrupted. A native named library is looked for <b>beside the executable</b>, so a host whose process is not the engine must load it first: <code>LoadLibrary("C:/apps/engine/sqlite3.dll")</code> in script, or <code>LoadLibrary</code> through the host's own FFI, before <code>Sqlite.OpenDb</code> can succeed.</p>
+
+<h2 id="limits">Limits, stated plainly</h2>
+<h3>There is no unloading</h3>
+<p>A loaded library stays loaded, and the AOT runtime inside it has threads of its own, so <code>FreeLibrary</code> after <code>slc_free</code> is not a supported teardown: the runtime would keep pointing at code the loader took away. Release sessions, keep the library, and let it live as long as the process does.</p>
+
+<h3>A run inside a native call cannot be interrupted</h3>
+<p><code>slc_cancel</code> stops a script at its next boundary: the next statement, the next loop back-edge, or the next chunk of a <code>sleep</code>. A run blocked inside a native call (a blocking read, a COM call that never returns, a native busy loop) keeps running, and <code>slc_free</code> answers <code>3</code> with the reason instead of pretending. There is no thread abort, because a thread cannot be aborted safely on this platform. If untrusted scripts must be killable, run them in a CHILD PROCESS: that is what the CLI is, and what the clipboard tool's Kill button depends on.</p>
+
+<h3>One GC and one crash domain</h3>
+<p>The engine shares your process, so a native fault inside it is a fault in your process: a <code>LoadLibrary</code> of a broken native, a corrupted <code>sqlite3.dll</code>, or a bug in the interpreter ends the host, not just the run. A script that recurses through the tree walker is <strong>caught by the engine's depth guard</strong>, which answers <code>Maximum call depth exceeded (3000), possible runaway recursion.</code> as a status-1 refusal with the host still alive, but a fault in native code cannot be contained this way.</p>
+
+<h3>Process statics are shared by every session</h3>
+<p>These live on the process, so two sessions in one process share them: the MCP tool registry, the form registry behind <code>Application.FindForm</code> and <code>Application.SingleInstance</code>, the main-thread task queue, the <code>Diagnostics</code> gates, the clipboard listener, global hotkeys. Two sessions are two interpreters, not two processes.</p>
+
+<h3>The host's identity leaks into a few answers</h3>
+<p><code>Environment.ProcessPath</code> is the host, so a script that respawns itself with it respawns the host. <code>Application.FilePath</code> follows <code>image</code> (the host's own image by default), and <code>Application.Path</code> follows <code>home</code>. The run's own directory comes from the file being run, so <code>./x</code> still means "beside the script".</p>
+
+<h3>One call at a time, and a pinned session is single-threaded</h3>
+<p>A second verb while one is in flight is refused by name. A session opened with <code>"thread":"host"</code> can only be driven from that thread; every other thread's call is refused with the reason. <code>slc_cancel</code> is the one verb that works from anywhere, because a token is a signal.</p>
+
+<h3>Windows only, and AOT only</h3>
+<p>The exports come from a NativeAOT image; a JIT build cannot produce them (the attribute is honoured only by the AOT compiler), so the <code>Debug</code> configuration is for the engine's own suites and not for embedding. The whole surface this engine exposes (UI, COM, hotkeys) is Windows, and <code>compile_aot.bat</code> publishes <code>win-x64</code>.</p>
+
+<h2 id="verifying">Verifying an artifact</h2>
+<p><code>bash tools/embed-check.sh</code> builds a small host (<code>src/embed/</code>, no reference to the engine), loads the published DLL and drives the ABI: the thread modes, the output callback, a run's declarations staying callable, a compiled bundle in both shapes, a runaway recursion coming back as a refusal, a cancel from another thread landing inside <code>sleep</code>, <code>slc_free</code> refusing while a run is in flight, and create/free cycles that leak no handles. It refuses a DLL older than <code>src/</code> rather than measuring it, prints the version and ABI revision it loaded, and exits 0 only when every check passed.</p>
+
+<h2 id="trouble">Troubleshooting</h2>
+
+<h3><code>slc_create</code> answered 0</h3>
+<p>The reason is in <code>slc_last_error(0, ...)</code>, since there is no handle yet. The three shapes it names: an option it does not know (a typo), a <code>thread</code> value that is not <code>auto</code>, <code>own</code> or <code>host</code>, and a <code>"thread":"host"</code> request on a thread that cannot carry a run (it names the apartment and the stack it found).</p>
+
+<h3>Nothing a script prints appears</h3>
+<p>No output callback is registered, and with none the output is DROPPED rather than written to the host's console. Call <code>slc_set_output</code> after <code>slc_create</code> and before the run.</p>
+
+<h3>The run answered 2</h3>
+<p>The call itself was wrong, not the script: a path that does not exist (<code>slc_last_error</code> names the resolved path), an empty name for <code>slc_call</code>, arguments that are not a JSON array, a session opened as <code>"thread":"host"</code> being driven from another thread, or a compiled bundle handed to <code>slc_run_file</code>, which says so and names <code>slc_run_bundle</code>.</p>
+
+<h3><code>slc_free</code> answered 3</h3>
+<p>A run is in flight. A free cannot abort a thread, so it refuses and leaves the handle valid: wait for the run, or cancel it and then free. Freeing twice, or freeing a handle that was never handed out, answers <code>2</code>.</p>
+
+<h3>A script that used to be deep now refuses</h3>
+<p>Read <code>slc_stats</code>: <code>stackMB</code> is the budget the depth guard measures against, and <code>thread</code> says whether the session is on your thread (<code>host</code>) or its own (<code>own</code>). A host thread with a small stack is the usual cause; <code>"thread":"own"</code> or <code>"auto"</code> fixes it.</p>
+
+<h3>COM refuses with "requires an STA thread"</h3>
+<p>That message means the session is on an MTA thread, which happens only when you asked for <code>"thread":"host"</code> on one, or made the session from a thread that later changed its apartment (which COM does not allow). Let the engine own the thread.</p>
+
+</body>
+</html>

@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Server, How To</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --accent3: #d29922;
+  --code-bg: #1c2128;
+  --inline-code: #f0883e;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+h1 { font-size: 2rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.02em; }
+h1 small { font-size: 1rem; color: var(--text-dim); font-weight: 400; }
+h2 { font-size: 1.4rem; font-weight: 600; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.1rem; font-weight: 600; margin: 28px 0 10px; }
+h4 { font-size: 0.95rem; font-weight: 600; margin: 20px 0 8px; color: var(--accent); }
+p { margin-bottom: 14px; color: var(--text-dim); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+strong { color: var(--text); }
+code {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--inline-code);
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 16px 0;
+  background: rgba(88,166,255,0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-dim);
+}
+blockquote strong { color: var(--text); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 0.85rem;
+}
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+th { background: var(--surface); font-weight: 600; color: var(--text); }
+td { color: var(--text-dim); }
+td code { font-size: 0.8rem; }
+ul, ol { margin: 8px 0 16px 20px; color: var(--text-dim); }
+li { margin-bottom: 4px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.note {
+  background: rgba(56,139,253,0.08);
+  border: 1px solid rgba(56,139,253,0.2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.tag-cli { background: rgba(210,153,34,0.15); color: var(--accent3); }
+.tag-api { background: rgba(63,185,80,0.15); color: var(--accent2); }
+.tag-info { background: rgba(88,166,255,0.15); color: var(--accent); }
+.toc { margin: 16px 0 24px; }
+.toc a { display: inline-block; margin: 2px 12px 2px 0; font-size: 0.88rem; }
+pre { position: relative; }
+.copy-btn {
+  position: absolute; top: 4px; right: 4px;
+  background: var(--border); color: var(--text-dim);
+  border: none; border-radius: 4px;
+  padding: 2px 8px; font-size: 0.7rem;
+  cursor: pointer; opacity: 0;
+  transition: opacity 0.15s;
+}
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: var(--accent); color: var(--bg); }
+.copy-btn.copied { background: var(--accent2); color: var(--bg); }
+@media (max-width: 600px) {
+  body { padding: 20px 12px 60px; }
+  h1 { font-size: 1.5rem; }
+  table { font-size: 0.78rem; }
+  th, td { padding: 5px 6px; }
+}
+</style>
+</head>
+<body>
+
+<h1>MCP Server <small>How To</small></h1>
+<p>ScriptLangCore can act as an <strong>MCP (Model Context Protocol) server</strong>, exposing script-defined tools to AI assistants like Claude Desktop, VS Code Copilot, or any MCP-compatible host.</p>
+
+<!-- ========================================================================= -->
+<!-- QUICK START -->
+<!-- ========================================================================= -->
+<h2>Quick start</h2>
+<pre><code>ScriptLangCore.exe --mcp --allowed-dir C:\Projects\my-data</code></pre>
+<p>The server loads all <code>.slc</code> files from the <code>tools/</code> directory next to the executable (or from the directories named by <code>--tools-dir</code>), registers any tools defined via <code>RegisterMcpTool()</code>, and starts listening for JSON-RPC 2.0 messages over <strong>stdio</strong> (default) or <strong>HTTP+SSE</strong> (with <code>--port</code>).</p>
+
+<div class="note"><strong>A tool script is EXECUTED, so the directory must hold tool scripts and nothing else.</strong> Loading a tool means running the file: one that waits, loops, or opens a dialog hangs startup, and one that faults natively ends the process before the server ever listens. Keep instruments, samples and scratch files in another folder, or point <code>--tools-dir</code> at a directory that holds only tools.</div>
+
+<div class="note"><strong>Not just for Claude.</strong> MCP is an open protocol (JSON-RPC 2.0 over stdio or SSE). The same config works with VS Code extensions (Cline, Continue, GitHub Copilot), IDEs (IntelliJ via Continue), editors (Cursor, Windsurf), and custom clients built with the <code>mcp</code> Python/TypeScript SDKs. The server doesn't know or care which client connected, it speaks standard MCP.</div>
+
+<!-- ========================================================================= -->
+<!-- TABLE OF CONTENTS -->
+<!-- ========================================================================= -->
+<h2>Table of contents</h2>
+<div class="toc">
+<a href="#cmdline">Command-line reference</a>
+<a href="#writing-tools">Writing tools</a>
+<a href="#api">RegisterMcpTool API</a>
+<a href="#marshalling">Argument marshalling</a>
+<a href="#sandbox">Path sandbox</a>
+<a href="#transport">Transport modes</a>
+<a href="#repl">REPL + MCP</a>
+<a href="#config">Configuration</a>
+<a href="#repl-commands">REPL commands</a>
+<a href="#protocol">MCP Protocol Methods</a>
+<a href="#example">Full example</a>
+<a href="#troubleshooting">Troubleshooting</a>
+</div>
+
+<!-- ========================================================================= -->
+<!-- COMMAND LINE -->
+<!-- ========================================================================= -->
+<h2 id="cmdline">Command-line reference</h2>
+<pre><code>ScriptLangCore.exe --mcp [--port &lt;number&gt;] [--allowed-dir &lt;path&gt;] [--tools-dir &lt;path&gt;]</code></pre>
+<pre><code>ScriptLangCore.exe --mcp-bc [--port &lt;number&gt;] [--allowed-dir &lt;path&gt;] [--tools-dir &lt;dir-of-bundles&gt;]</code></pre>
+<p><code>--mcp-bc</code> takes every <code>--mcp</code> flag and changes one thing: the tools directory is read
+as compiled <code>*.slcbc</code> bundles instead of <code>*.slc</code> sources. Each bundle is loaded and RUN, so
+its top-level <code>RegisterMcpTool()</code> calls register exactly as a script's do.</p>
+
+<table>
+<tr><th>Flag</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>--mcp</code></td><td>Yes</td><td>Start in MCP server mode instead of CLI/REPL</td></tr>
+<tr><td><code>--port &lt;N&gt;</code></td><td>No</td><td>Enable HTTP+SSE transport on <code>http://localhost:N/</code>. Default: stdio</td></tr>
+<tr><td><code>--url &lt;prefix&gt;</code></td><td>No</td><td>Full URL prefix (supports <code>https://</code>). Overrides <code>--port</code>. Example: <code>--url https://*:8765/</code></td></tr>
+<tr><td><code>--allowed-dir &lt;path&gt;</code></td><td>No (recommended)</td><td>Restrict file operations to this directory. Can be repeated.</td></tr>
+<tr><td><code>--tools-dir &lt;path&gt;</code></td><td>No</td><td>Load tool scripts from this directory INSTEAD of <code>tools/</code>. Can be repeated. A relative path is resolved against the current directory.</td></tr>
+<tr><td><code>--repl</code></td><td>No</td><td>Start MCP server in background + launch interactive REPL for testing.</td></tr>
+</table>
+
+<h4>Examples</h4>
+<pre><code><span class="tag tag-cli">stdio</span> ScriptLangCore.exe --mcp --allowed-dir C:\Projects
+<span class="tag tag-cli">http</span>  ScriptLangCore.exe --mcp --port 8765 --allowed-dir C:\Projects
+<span class="tag tag-cli">multi</span> ScriptLangCore.exe --mcp --allowed-dir C:\Data --allowed-dir D:\Work
+<span class="tag tag-cli">https</span> ScriptLangCore.exe --mcp --url https://+:8765/ --allowed-dir C:\Projects
+<span class="tag tag-cli">tools</span> ScriptLangCore.exe --mcp --tools-dir C:\MyTools --allowed-dir C:\Projects
+<span class="tag tag-cli">repl</span>  ScriptLangCore.exe --mcp --port 8765 --repl --allowed-dir C:\Projects</pre>
+
+<div class="note"><strong>--repl requires --port (SSE).</strong> Both the REPL and the stdio MCP server read from stdin and cannot coexist in stdio mode. <code>--repl</code> without <code>--port</code> auto-defaults to <code>http://localhost:8765/</code>. For pure stdio (Claude Desktop, VS Code), omit <code>--repl</code>.</div>
+
+<!-- ========================================================================= -->
+<!-- WRITING TOOLS -->
+<!-- ========================================================================= -->
+<h2 id="writing-tools">Writing tools</h2>
+<p>Each tool is a script function registered via <code>RegisterMcpTool()</code>. Place your scripts in the <code>tools/</code> directory alongside <code>ScriptLangCore.exe</code>, or in a directory of your own named by <code>--tools-dir</code>. Only tool scripts belong there: every file in that directory is executed at startup.</p>
+
+<h4>Minimal example</h4>
+<pre><code><span class="tag tag-api">tools/hello.slc</span>
+RegisterMcpTool("hello", "Greet a person by name.",
+    fun(string name) {
+        return "Hello, " + name + "!";
+    },
+    '{ "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }'
+);</code></pre>
+
+<h4>What happens when the server starts</h4>
+<ol>
+<li><code>ScriptLangCore.exe --mcp</code> scans <code>tools/</code> (or each <code>--tools-dir</code>) for <code>*.slc</code> files</li>
+<li><code>ScriptLangCore.exe --mcp-bc</code> does the same with <code>*.slcbc</code> instead: each bundle is
+LOADED AND RUN, so its top-level <code>RegisterMcpTool()</code> calls still register. A compiled bundle is not
+merely a library, which is what makes a tools directory of compiled bundles work.</li>
+<li>Each file is RUN, from its first line: <code>RegisterMcpTool()</code> registers the tool in the MCP tool registry. That is why the directory must hold tool scripts and nothing else: the load is an execution, so a script that blocks hangs the startup and one that faults natively ends the process</li>
+<li>When the AI sends <code>tools/call</code>, the server looks up the tool by name, marshals the JSON arguments to script values, invokes the function, and returns the result as JSON</li>
+</ol>
+
+<!-- ========================================================================= -->
+<!-- API -->
+<!-- ========================================================================= -->
+<h2 id="api">RegisterMcpTool API</h2>
+<pre><code>RegisterMcpTool(name, description, handler, [schema])</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>name</code></td><td><code>string</code></td><td>Yes</td><td>Tool name used in <code>tools/call</code>. Must be unique.</td></tr>
+<tr><td><code>description</code></td><td><code>string</code></td><td>Yes</td><td>Human-readable description shown to the AI.</td></tr>
+<tr><td><code>handler</code></td><td><code>Function</code></td><td>Yes</td><td>Script function invoked when the tool is called.</td></tr>
+<tr><td><code>schema</code></td><td><code>string</code></td><td>No</td><td>JSON Schema describing the input parameters.</td></tr>
+</table>
+
+<h4>Handler function signature</h4>
+<pre><code>fun(string path, string content) {
+    // Return a string, it becomes the MCP response content.
+    return "result";
+}</code></pre>
+
+<!-- ========================================================================= -->
+<!-- MARSHALLING -->
+<!-- ========================================================================= -->
+<h2 id="marshalling">Argument marshalling</h2>
+<p>When the AI calls a tool, the MCP server reads the parameter names from the function declaration, looks up matching keys in the <code>arguments</code> JSON object, and converts values:</p>
+
+<table>
+<tr><th>JSON type</th><th>Script type</th></tr>
+<tr><td><code>string</code></td><td><code>string</code></td></tr>
+<tr><td><code>number</code></td><td><code>int</code> or <code>double</code></td></tr>
+<tr><td><code>true</code> / <code>false</code></td><td><code>bool</code></td></tr>
+<tr><td><code>null</code></td><td><code>null</code></td></tr>
+<tr><td><code>object</code> / <code>array</code></td><td><code>string</code> (raw JSON)</td></tr>
+</table>
+<p>If the function has no named parameters, the entire <code>arguments</code> object is passed as a single JSON string.</p>
+
+<!-- ========================================================================= -->
+<!-- SANDBOX -->
+<!-- ========================================================================= -->
+<h2 id="sandbox">Path sandbox</h2>
+<p>The <code>--allowed-dir</code> flag restricts which files tools can access. The sandbox only checks string arguments that <strong>look like file paths</strong> (contain <code>/</code>, <code>\</code>, <code>.</code>, or start with a drive letter like <code>C:</code>). Plain strings like <code>"hello"</code> are allowed through. Any tool that tries to read or write a file outside the allowed directory receives an error:</p>
+
+<pre><code>{
+  "error": {
+    "code": -32000,
+    "message": "Access denied: 'D:\\secrets.txt' is outside allowed directories."
+  }
+}</code></pre>
+
+<h4>How it works</h4>
+<ul>
+<li>Paths are resolved via <code>Path.GetFullPath()</code> before checking</li>
+<li>Comparison is case-insensitive</li>
+<li>Subdirectories of the allowed directory are permitted</li>
+<li>Multiple <code>--allowed-dir</code> flags can be specified</li>
+</ul>
+
+<div class="note"><strong>Without <code>--allowed-dir</code>, tools have unrestricted filesystem access</strong>, the sandbox is opt-in.</div>
+
+<!-- ========================================================================= -->
+<!-- MIDDLEWARE -->
+<!-- ========================================================================= -->
+<h2 id="middleware">Middleware pipeline</h2>
+<p>Middleware intercepts every tool call before the handler runs. Register middleware with <code>mcp.Use</code>:</p>
+
+<pre><code><span class="tag tag-api">tools/mcp_middleware.slc</span>
+// Logging middleware
+mcp.Use((McpContext ctx, Action next) => {
+    print("  [middleware] tool=" + ctx.ToolName + " args=" + ctx.Args.Count);
+    next();
+});</code></pre>
+
+<h4>Pipeline flow</h4>
+<table>
+<tr><th>Action</th><th>Effect</th></tr>
+<tr><td><code>next()</code></td><td>Continue to the next middleware (or tool handler)</td></tr>
+<tr><td><code>ctx.ErrorMessage = "msg"</code></td><td>Stop the pipeline, returns error to caller</td></tr>
+<tr><td><code>ctx.Result = value</code></td><td>Bypass tool handler, return this value directly</td></tr>
+<tr><td>No <code>next()</code> call</td><td>Silent short-circuit, pipeline stops</td></tr>
+</table>
+
+<h4>Multiple middleware, onion order</h4>
+<pre><code>mcp.Use((McpContext ctx, Action next) => { print("A"); next(); print("a"); });
+mcp.Use((McpContext ctx, Action next) => { print("B"); next(); print("b"); });
+mcp.Use((McpContext ctx, Action next) => { print("C"); });
+// Execution order: A → B → C → b → a</code></pre>
+
+<h4>Blocking a tool</h4>
+<pre><code>mcp.Use((McpContext ctx, Action next) => {
+    if (ctx.ToolName == "delete_file") {
+        ctx.ErrorMessage = "delete_file is blocked by policy";
+        return;  // don't call next()
+    }
+    next();
+});</code></pre>
+
+<h4>Context properties</h4>
+<table>
+<tr><th>Property</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>ctx.ToolName</code></td><td><code>string</code></td><td>Name of the tool being called</td></tr>
+<tr><td><code>ctx.Args</code></td><td><code>list</code></td><td>Arguments passed to the tool</td></tr>
+<tr><td><code>ctx.Result</code></td><td><code>object?</code></td><td>Set to return a value (bypasses handler)</td></tr>
+</table>
+
+<p><code>tcp.Use</code> is also available for TCP connection middleware: it runs for every connection the engine's own TCP server accepts (<code>Server.Create</code> + <code>Server.Start</code>). Its context is a <code>TcpContext</code> (provides <code>RemoteAddress</code>, <code>Close()</code>).</p>
+
+<h2 id="http-middleware">HTTP server middleware</h2>
+<p><code>http.Use</code> registers middleware for non-MCP HTTP requests on the same port. Every request that isn't <code>POST /</code> or <code>GET /sse</code> flows through the HTTP middleware pipeline.</p>
+
+<pre><code><span class="tag tag-api">tools/mcp_httpserver.slc</span>
+// Logging middleware
+http.Use((HttpContext ctx, Action next) => {
+    print("  [http] " + ctx.HttpMethod + " " + ctx.Url);
+    next();
+});
+
+// Route: GET /hello
+http.Use((HttpContext ctx, Action next) => {
+    if (ctx.Url == "/hello" && ctx.HttpMethod == "GET") {
+        ctx.ResponseBody = "Hello from middleware!";
+        ctx.ResponseStatus = 200;
+        return;  // short-circuit
+    }
+    next();
+});</code></pre>
+
+<h4>Context properties</h4>
+<table>
+<tr><th>Property</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>ctx.HttpMethod</code></td><td><code>string</code></td><td>HTTP method (<code>GET</code>, <code>POST</code>, etc.)</td></tr>
+<tr><td><code>ctx.Url</code></td><td><code>string</code></td><td>Request path (e.g., <code>/hello</code>)</td></tr>
+<tr><td><code>ctx.Body</code></td><td><code>string?</code></td><td>Request body (for POST/PUT)</td></tr>
+<tr><td><code>ctx.ResponseStatus</code></td><td><code>int</code></td><td>Set to change HTTP status (default 200)</td></tr>
+<tr><td><code>ctx.ResponseBody</code></td><td><code>string?</code></td><td>Set to define the response text</td></tr>
+<tr><td><code>ctx.ResponseBytes</code></td><td><code>byte[]?</code></td><td>Set to return raw binary data (overrides ResponseBody)</td></tr>
+<tr><td><code>ctx.ErrorMessage</code></td><td><code>string?</code></td><td>Set to return HTTP 500 with error</td></tr>
+</table>
+
+<h4>Pipeline flow</h4>
+<p>Same onion-order as <code>mcp.Use</code>: <code>next()</code> continues, no <code>next()</code> short-circuits, <code>ctx.ErrorMessage</code> returns 500 error carrying its text as the body, <code>ctx.ResponseBody</code> + <code>ResponseStatus</code> define the response. A status the ENGINE sets carries no body, the way ASP.NET Core does it: a path nothing answers is a 404 with <code>Content-Length: 0</code>, and an unhandled exception is a 500 with no body (the cause goes to the server's log). Without any middleware at all, every non-MCP path returns 404.</p>
+
+<h4>Testing from curl</h4>
+<pre><code># Welcome page
+curl http://localhost:8765/
+
+# Current server time
+curl http://localhost:8765/time
+
+# Server status (memory)
+curl http://localhost:8765/status
+
+# Hello world
+curl http://localhost:8765/hello
+
+# POST JSON echo
+curl -X POST http://localhost:8765/echo -H "Content-Type: application/json" -d '{"message":"hello"}'
+# → Echo: {"message":"hello"}
+
+# POST raw text
+curl -X POST http://localhost:8765/echo -d "hello"
+# → Echo: hello
+
+# Download a file (text or binary) via HTTP middleware and save to disk
+curl -X POST http://localhost:8765/download -d "README.md" -o README.md
+
+# Download a binary file, exact bytes preserved via ResponseBytes
+curl -X POST http://localhost:8765/download -d "publish-aot/ScriptLangCore.exe" -o ScriptLangCore.exe</code></pre>
+
+<h4>Testing from browser DevTools</h4>
+<pre><code>// GET routes
+fetch("http://localhost:8765/time").then(r =&gt; r.text()).then(console.log)
+// → "2026-07-10 19:45:30"
+
+fetch("http://localhost:8765/status").then(r =&gt; r.text()).then(console.log)
+// → "Status: running\nMemory: 12345678 bytes"
+
+// POST with JSON body
+fetch("http://localhost:8765/echo", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({hello: "world"})
+}).then(r =&gt; r.text()).then(console.log)
+// → "Echo: {\"hello\":\"world\"}"</code></pre>
+
+<div class="note"><strong>Routes are shared with MCP.</strong> All requests arrive on the single HTTP listener. MCP paths (<code>POST /</code> and <code>GET /sse</code>) are handled first; everything else passes through the HTTP middleware pipeline. To start the server: <code>ScriptLangCore.exe --mcp --port 8765</code>.</div>
+
+<!-- ========================================================================= -->
+<!-- TRANSPORT -->
+<!-- ========================================================================= -->
+<h2 id="repl">REPL + MCP combo</h2>
+<p>Use <code>--repl</code> to run the MCP server in a background thread while keeping the interactive REPL. This is useful for debugging, you can call tool functions directly from the REPL while the server handles AI requests.</p>
+<pre><code><span class="tag tag-cli">repl</span> ScriptLangCore.exe --mcp --port 8765 --repl --allowed-dir C:\Projects</code></pre>
+<p>From the REPL you can:</p>
+<ul>
+<li>Type <code>.mcp</code> to list all registered tools</li>
+<li>Call tool functions directly: <code>.call test_echo {"message":"hi"}</code></li>
+<li>Modify scripts and re-register tools (restart required to reload from disk)</li>
+<li>Test edge cases before letting the AI use the tool</li>
+</ul>
+
+<h2 id="transport">Transport modes</h2>
+
+<h4>Stdio (default)</h4>
+<p>The server reads JSON-RPC messages from stdin and writes responses to stdout. This works with Claude Desktop, VS Code, and most MCP hosts.</p>
+<pre><code>┌──────────────┐  stdio JSON-RPC  ┌──────────────────┐
+│  AI Client   │ ◄──────────────► │  ScriptLangCore  │
+└──────────────┘                  └──────────────────┘</code></pre>
+<div class="note"><strong>Stdio = JSON-RPC only.</strong> In pure stdio mode (without <code>--port</code> or <code>--repl</code>), every line is read as JSON-RPC. Typing <code>.help</code> or other REPL commands will fail with a parse error. For interactive testing, use <code>--repl --port 8765</code> instead.</div>
+<h5>Send requests from PowerShell</h5>
+<p>Pipe a JSON-RPC message to the executable:</p>
+<pre><code># List tools
+'{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | .\ScriptLangCore.exe --mcp
+
+# Ping
+'{"jsonrpc":"2.0","id":1,"method":"ping"}' | .\ScriptLangCore.exe --mcp
+
+# Call a tool
+'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hi"}}}' | .\ScriptLangCore.exe --mcp</code></pre>
+
+<p>For file-based requests:</p>
+<pre><code># Save request to file
+Set-Content request.json '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# Pipe the file
+Get-Content request.json | .\ScriptLangCore.exe --mcp
+
+# Capture and format the response
+$response = Get-Content request.json | .\ScriptLangCore.exe --mcp
+$response | ConvertFrom-Json | ConvertTo-Json -Depth 10</code></pre>
+
+<h4>HTTP+SSE (<code>--port</code> / <code>--url</code>)</h4>
+<p>When <code>--port</code> or <code>--url</code> is specified, the server listens for HTTP(S) connections:</p>
+<pre><code>POST /     → JSON-RPC request/response (tools/call, tools/list)
+GET  /sse  → Server-Sent Events stream for notifications</code></pre>
+<p>All other paths return 404.</p>
+
+<h3>Testing from a browser or HTTP client</h3>
+<p>You can call MCP tools directly from any HTTP client, no AI assistant needed.</p>
+
+<h4>Browser DevTools Console</h4>
+<p>Open DevTools (<kbd>F12</kbd>) on any page.</p>
+
+<p><strong>List tools:</strong></p>
+<pre><code>fetch("http://localhost:8765/", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({
+    jsonrpc: "2.0", id: 1, method: "tools/list"
+  })
+}).then(r =&gt; r.json()).then(console.log)</code></pre>
+
+<p><strong>Call a tool:</strong></p>
+<pre><code>fetch("http://localhost:8765/", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({
+    jsonrpc: "2.0", id: 2, method: "tools/call",
+    params: { name: "test_echo", arguments: { message: "hello from browser" } }
+  })
+}).then(r =&gt; r.json()).then(console.log)</code></pre>
+
+<p><strong>More examples:</strong></p>
+<pre><code>// test_add, two integers
+fetch("http://localhost:8765/", {method:"POST",headers:{"Content-Type":"application/json"},
+  body: JSON.stringify({jsonrpc:"2.0", id:3, method:"tools/call",
+    params:{name:"test_add", arguments:{a:42, b:58}}
+  })}).then(r=&gt;r.json()).then(console.log)
+
+// test_bool, booleans
+fetch("http://localhost:8765/", {method:"POST",headers:{"Content-Type":"application/json"},
+  body: JSON.stringify({jsonrpc:"2.0", id:4, method:"tools/call",
+    params:{name:"test_bool", arguments:{flag:true, enabled:false}}
+  })}).then(r=&gt;r.json()).then(console.log)
+
+// test_mixed, all types together
+fetch("http://localhost:8765/", {method:"POST",headers:{"Content-Type":"application/json"},
+  body: JSON.stringify({jsonrpc:"2.0", id:5, method:"tools/call",
+    params:{name:"test_mixed", arguments:{name:"widget", count:5, price:9.99, active:true}}
+  })}).then(r=&gt;r.json()).then(console.log)</code></pre>
+
+<h4>curl</h4>
+<div class="note">The <code>-d</code> flag is required, it sets the <code>Content-Length</code> header. Without it, <code>HttpListener</code> returns HTTP 411 (Length Required).</div>
+<pre><code># List tools
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# Call a tool
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_echo","arguments":{"message":"hello from curl"}}}'</code></pre>
+
+<h4>PowerShell</h4>
+<pre><code># List tools
+Invoke-RestMethod -Uri http://localhost:8765/ -Method Post -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' -ContentType "application/json"
+
+# Call a tool
+Invoke-RestMethod -Uri http://localhost:8765/ -Method Post -Body '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_echo","arguments":{"message":"hi from powershell"}}}' -ContentType "application/json"</code></pre>
+
+<p>Expected response:</p>
+<pre><code>{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"ECHO: hello from curl"}]}}</code></pre>
+
+<h4>HTTPS setup</h4>
+<p><code>HttpListener</code> supports HTTPS when a certificate is bound to the port:</p>
+<pre><code># 1. Create a self-signed certificate (one time)
+dotnet dev-certs https --trust
+
+# 2. Get the certificate thumbprint (40-char hex string)
+certutil -store -user My | findstr /i "sha1"
+# Copy the hex string (e.g., dc40e6b404fde6c692946efbe0e679193330e830)
+
+# 3. Bind the certificate to the port (run as Administrator)
+netsh http add sslcert ipport=0.0.0.0:8765 certhash="REPLACE_WITH_ACTUAL_THUMBPRINT" appid="{00000000-0000-0000-0000-000000000000}"
+
+# 4. Start with HTTPS
+ScriptLangCore.exe --mcp --url https://+:8765/ --allowed-dir C:\Projects</code></pre>
+
+<h4>HTTPS troubleshooting</h4>
+<p><strong>Error 1312: "A specified logon session does not exist"</strong>, the certificate is in the <strong>Current User</strong> store but HTTP.sys requires it in the <strong>Local Machine</strong> store.</p>
+<pre><code># Export from Current User with private key
+certutil -user -exportpfx -p "password" MY REPLACE_WITH_THUMBPRINT mycert.pfx
+
+# Import into Local Machine store (run as Administrator)
+certutil -importpfx -p "password" mycert.pfx
+
+# Grant NETWORK SERVICE read access to the private key
+# certlm.msc → Personal → Certificates → right-click cert →
+# All Tasks → Manage Private Keys → Add NETWORK SERVICE with Read
+
+# Now bind should work
+netsh http add sslcert ipport=0.0.0.0:8765 certhash="REPLACE_WITH_ACTUAL_THUMBPRINT" appid="{00000000-0000-0000-0000-000000000000}"</code></pre>
+<div class="note">For local development, if the AI assistant runs on the same machine, HTTP on localhost is safe, traffic never leaves your computer. Skip the HTTPS setup and use <code>--port</code> instead.</div>
+
+<p>The <code>--url</code> flag accepts any prefix that <code>HttpListener</code> supports:</p>
+<ul>
+<li><code>http://localhost:8765/</code>, localhost only (default with <code>--port</code>)</li>
+<li><code>http://*:8765/</code>, all network interfaces, HTTP</li>
+<li><code>https://+:8765/</code>, all network interfaces, HTTPS (requires certificate)</li>
+<li><code>https://myhost.example.com:8765/</code>, specific hostname</li>
+</ul>
+
+<!-- ========================================================================= -->
+<!-- CONFIGURATION -->
+<!-- ========================================================================= -->
+<h2 id="config">Configuration for AI clients</h2>
+
+<h4>Claude Desktop</h4>
+<p>Edit <code>claude_desktop_config.json</code> (usually at <code>%APPDATA%\Claude\</code>):</p>
+<pre><code>{
+  "mcpServers": {
+    "scriptlang": {
+      "command": "C:\\Tools\\ScriptLangCore.exe",
+      "args": ["--mcp", "--allowed-dir", "C:\\Projects"]
+    }
+  }
+}</code></pre>
+
+<h4>VS Code (Cline / Continue)</h4>
+<p>In your VS Code extension settings for Cline or Continue:</p>
+<pre><code>{
+  "mcpServers": {
+    "scriptlang": {
+      "command": "C:\\Tools\\ScriptLangCore.exe",
+      "args": ["--mcp", "--allowed-dir", "C:\\Projects"]
+    }
+  }
+}</code></pre>
+
+<h4>Compatibility with other AI tools</h4>
+<p>MCP is an <strong>open protocol</strong>, it is not tied to Anthropic or Claude. Any AI tool that implements the MCP client side can connect.</p>
+
+<table>
+<tr><th>Tool / Editor</th><th>Config location</th><th>Same config?</th></tr>
+<tr><td><strong>Claude Desktop</strong></td><td><code>%APPDATA%\Claude\claude_desktop_config.json</code></td><td>✅ Identical JSON</td></tr>
+<tr><td><strong>Cline</strong> (VS Code)</td><td>VS Code settings → <code>mcpServers</code></td><td>✅ Identical JSON</td></tr>
+<tr><td><strong>Continue</strong> (VS Code / IntelliJ)</td><td>Settings → <code>mcpServers</code></td><td>✅ Identical JSON</td></tr>
+<tr><td><strong>GitHub Copilot</strong> (VS Code)</td><td>VS Code settings → <code>mcpServers</code></td><td>✅ Identical JSON</td></tr>
+<tr><td><strong>Cursor</strong></td><td>Project root → <code>.cursor/tools.json</code></td><td>⚠️ Different path</td></tr>
+<tr><td><strong>Windsurf</strong></td><td>Settings → MCP servers</td><td>✅ Identical JSON</td></tr>
+<tr><td><strong>Custom client</strong></td><td>Any language (Python, TS, Java)</td><td>✅ Stdio or SSE</td></tr>
+</table>
+
+<h4>Config for Cursor</h4>
+<pre><code>// .cursor/tools.json (place in your project root)
+{
+  "scriptlang": {
+    "command": "C:\\Tools\\ScriptLangCore.exe",
+    "args": ["--mcp", "--allowed-dir", "C:\\Projects"]
+  }
+}</code></pre>
+
+<h4>Custom Python client (HTTP+SSE)</h4>
+<pre><code><span class="tag tag-api">connect_via_sse.py</span>
+import requests
+
+resp = requests.post("http://localhost:8765", json={
+    "jsonrpc": "2.0", "id": 1, "method": "tools/list"
+})
+print(resp.json())
+
+resp = requests.post("http://localhost:8765", json={
+    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+    "params": {"name": "read_file", "arguments": {"path": "test.txt"}}
+})
+print(resp.json())</code></pre>
+
+<h4>Custom TypeScript client (stdio)</h4>
+<pre><code><span class="tag tag-api">connect_via_stdio.ts</span>
+import { spawn } from "child_process";
+
+const mcp = spawn("C:\\Tools\\ScriptLangCore.exe", [
+  "--mcp", "--allowed-dir", "C:\\Projects"
+]);
+
+mcp.stdin.write(JSON.stringify({
+  jsonrpc: "2.0", id: 1, method: "tools/list"
+}) + "\n");
+
+mcp.stdout.on("data", (data) => {
+  console.log("Response:", data.toString());
+});</code></pre>
+
+<div class="note">The wire protocol is always the same, JSON-RPC 2.0 with <code>\n</code>-delimited messages over stdio, or HTTP POST + SSE for remote connections. <strong>The server doesn't know or care which client is connected.</strong></div>
+
+<!-- ========================================================================= -->
+<!-- PROTOCOL METHODS -->
+<!-- ========================================================================= -->
+<h2 id="protocol">MCP Protocol Methods (not tools)</h2>
+<p>The MCP server handles several protocol-level methods that don't appear in <code>.mcp</code> because they're not registered via <code>RegisterMcpTool</code>. These are built into the server and handle lifecycle, logging, and resource discovery.</p>
+
+<h4>Lifecycle</h4>
+<table>
+<tr><th>Method</th><th>Purpose</th></tr>
+<tr><td><code>ping</code></td><td>Health check, keeps clients connected</td></tr>
+<tr><td><code>initialize</code></td><td>Protocol version + capability negotiation</td></tr>
+<tr><td><code>notifications/initialized</code></td><td>Client confirms initialization complete (no response)</td></tr>
+</table>
+
+<p>The server responds to <code>initialize</code> with:</p>
+<pre><code>{
+  "protocolVersion": "2025-03-26",
+  "capabilities": {
+    "tools": {},
+    "resources": {},
+    "logging": {}
+  }
+}</code></pre>
+
+<h4>Logging</h4>
+<p>Clients can set the log verbosity level:</p>
+<pre><code>curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"logging/setLevel","params":{"level":"debug"}}'</code></pre>
+<p>Log messages go to stderr, filtered by level:</p>
+<table>
+<tr><th>Level</th><th>Shows</th><th>Example</th></tr>
+<tr><td><code>debug</code></td><td>Everything (headers + body)</td><td>See example below</td></tr>
+<tr><td><code>info</code></td><td>Tool calls + errors</td><td><code>[MCP infos] tool:system_info args:0</code></td></tr>
+<tr><td><code>notice</code></td><td>Same as info (reserved)</td><td></td></tr>
+<tr><td><code>warning</code></td><td>Errors only</td><td></td></tr>
+<tr><td><code>error</code></td><td>Errors only</td><td><code>[MCP error] tool:read_file failed: ...</code></td></tr>
+<tr><td><code>off</code></td><td>Nothing</td><td></td></tr>
+</table>
+
+<h5>Debug level output (full HTTP trace)</h5>
+<pre><code>[2026-06-04 20:21:44][MCP debug] ↓ POST / from [::1]:65157
+[2026-06-04 20:21:44][MCP debug]   Content-Length: 113
+[2026-06-04 20:21:44][MCP debug]   Content-Type: application/json
+[2026-06-04 20:21:44][MCP debug]   Accept: */*
+[2026-06-04 20:21:44][MCP debug]   Host: localhost:8765
+[2026-06-04 20:21:44][MCP debug]   User-Agent: curl/8.18.0
+[2026-06-04 20:21:44][MCP debug]   Body[113]: {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello from curl"}}}
+[2026-06-04 20:21:44][MCP debug] → tools/call id=2
+[2026-06-04 20:21:44][MCP infos] tool:echo args:1</code></pre>
+
+<h5>Info level output (tool call only)</h5>
+<pre><code>[2026-06-04 20:21:44][MCP infos] tool:echo args:1</code></pre>
+
+<h4>RegisterMcpResource API</h4>
+<p>Resources expose read-only data via the MCP resources protocol. Register them from scripts:</p>
+<pre><code>RegisterMcpResource(uri, name, mimeType, handler)</code></pre>
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>uri</code></td><td><code>string</code></td><td>Yes</td><td>Unique identifier (e.g., <code>"info/system"</code>)</td></tr>
+<tr><td><code>name</code></td><td><code>string</code></td><td>Yes</td><td>Human-readable name shown to the AI</td></tr>
+<tr><td><code>mimeType</code></td><td><code>string</code></td><td>Yes</td><td>MIME type (<code>"text/plain"</code>, <code>"application/json"</code>)</td></tr>
+<tr><td><code>handler</code></td><td><code>Function</code></td><td>Yes</td><td>Zero-argument function returning content as string</td></tr>
+</table>
+<p><strong>Handler is zero-argument</strong>, no parameters, returns the resource content as a string:</p>
+<pre><code>// Inline lambda
+RegisterMcpResource("info/system", "System Info", "text/plain",
+    fun() { return "OS: " + Environment.OSVersion; }
+);
+
+// Named function also works
+string myHandler() { return File.ReadAllText("README.md"); }
+RegisterMcpResource("docs/readme", "README", "text/markdown", myHandler);</code></pre>
+
+<h4>Resources</h4>
+<p>Resources are read-only data exposed alongside tools. Listed via <code>resources/list</code>, read via <code>resources/read</code>:</p>
+<pre><code># List available resources
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"resources/list"}'
+
+# → {"jsonrpc":"2.0","id":1,"result":{"resources":[{"uri":"info/system","name":"System Info","mimeType":"text/plain"}]}}
+
+# Read a specific resource
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"info/system"}}'
+
+# → {"jsonrpc":"2.0","id":2,"result":{"contents":[{"uri":"info/system","mimeType":"text/plain","text":"OS: ...\nCores: 16\n..."}]}}</code></pre>
+
+<h4>Tools vs Resources</h4>
+<table>
+<tr><th></th><th>Tools (<code>tools/call</code>)</th><th>Resources (<code>resources/read</code>)</th></tr>
+<tr><td><strong>Use for</strong></td><td>Actions, write files, modify state</td><td>Data, read-only files, config, info</td></tr>
+<tr><td><strong>From <code>.call</code></strong></td><td>✅ <code>.call read_file {"path":"..."}</code></td><td>❌ Protocol method</td></tr>
+<tr><td><strong>From curl</strong></td><td>✅ <code>tools/call</code></td><td>✅ <code>resources/read</code></td></tr>
+<tr><td><strong>Discovery</strong></td><td><code>.mcp</code> listing</td><td><code>resources/list</code></td></tr>
+<tr><td><strong>Parameters</strong></td><td>Required (tool-defined)</td><td>None (handler is zero-arg)</td></tr>
+</table>
+
+<h4>Testing from curl</h4>
+<pre><code># Ping the server
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
+
+# Check protocol version
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+
+# Set debug logging
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"logging/setLevel","params":{"level":"debug"}}'
+
+# List resources
+curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"resources/list"}'</code></pre>
+
+<!-- ========================================================================= -->
+<!-- FULL EXAMPLE -->
+<!-- ========================================================================= -->
+<h2 id="example">Full example</h2>
+<p>Here's a complete MCP tool script that exposes file operations to the AI:</p>
+
+<pre><code><span class="tag tag-api">tools/file_tools.slc</span>
+// ── Read a file ──
+RegisterMcpTool("read_file", "Read the full contents of a text file.",
+    fun(string path) {
+        if (!File.Exists(path))
+            return "Error: file not found: " + path;
+        return File.ReadAllText(path);
+    },
+    '{ "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }'
+);
+
+// ── Write a file ──
+RegisterMcpTool("write_file", "Write text content to a file (creates or overwrites).",
+    fun(string path, string content) {
+        File.WriteAllText(path, content);
+        return "Written: " + path + " (" + content.Length + " chars)";
+    },
+    '{ "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } }, "required": ["path", "content"] }'
+);
+
+// ── List directory ──
+RegisterMcpTool("list_dir", "List all files in a directory.",
+    fun(string dir) {
+        if (!Directory.Exists(dir))
+            return "Error: directory not found: " + dir;
+        var files = Directory.GetFiles(dir);
+        var result = "Files in " + dir + ":\n";
+        var i = 0;
+        while (i &lt; files.Count) {
+            result = result + "  " + files[i] + "\n";
+            i = i + 1;
+        }
+        return result;
+    },
+    '{ "type": "object", "properties": { "dir": { "type": "string" } }, "required": ["dir"] }'
+);
+
+// ── File size ──
+RegisterMcpTool("file_size", "Get the size of a file in bytes.",
+    fun(string path) {
+        if (!File.Exists(path))
+            return "Error: file not found: " + path;
+        var size = File.GetSize(path);
+        return path + ", " + size + " bytes";
+    },
+    '{ "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }'
+);
+
+// ── System info ──
+RegisterMcpTool("system_info", "Return OS and process information.",
+    fun() {
+        var os  = Environment.OSVersion;
+        var proc = Environment.ProcessorCount;
+        var mem = GC.GetTotalMemory();
+        return "OS: " + os + "\nCPU cores: " + proc + "\nGC memory: " + mem + " bytes";
+    },
+    '{ "type": "object", "properties": {} }'
+);</code></pre>
+
+<!-- ========================================================================= -->
+<!-- REPL COMMANDS -->
+<!-- ========================================================================= -->
+<h2 id="repl-commands">REPL commands</h2>
+<p>Start the MCP server on a background thread with the interactive REPL for live testing:</p>
+<pre><code>ScriptLangCore.exe --mcp --port 8765 --repl --allowed-dir C:\Projects</code></pre>
+<p>Once started, the REPL provides these MCP-specific commands:</p>
+
+<h4><code>.log</code>, set MCP log level</h4>
+<pre><code>&gt;&gt;&gt; .log debug
+Log level set to: debug
+
+&gt;&gt;&gt; .log warning
+Log level set to: warning
+
+&gt;&gt;&gt; .log off
+Logging disabled.</code></pre>
+<p>Levels: <code>debug</code> &lt; <code>info</code> &lt; <code>notice</code> &lt; <code>warning</code> &lt; <code>error</code>. <code>off</code> disables logging.</p>
+
+<h4><code>.mcp</code>, list registered tools</h4>
+<pre><code>&gt;&gt;&gt; .mcp
+Registered MCP tools (6):
+  read_file(path: string)                           Read the full contents of a text file from disk.
+  write_file(path: string, content: string)         Write text content to a file (creates or overwrites).
+  list_dir(dir: string)                             List all files in a directory.
+  test_echo(message: string)                        Echo back the input (quick connectivity test).
+  test_add(a: int, b: int)                          Add two numbers (tests number marshalling).
+  [Protocol methods: ping, initialize, logging/setLevel, resources/list]</code></pre>
+
+<h4><code>.call</code>, invoke a tool directly</h4>
+<pre><code>&gt;&gt;&gt; .call test_echo {"message":"hi"}
+ECHO: hi
+
+&gt;&gt;&gt; .call test_add {"a":3,"b":4}
+Result: 7
+
+&gt;&gt;&gt; .call read_file {"path":"test.txt"}
+(file contents)</code></pre>
+<h4>Supported JSON argument types</h4>
+<table>
+<tr><th>JSON type</th><th>Script type</th><th>Example</th></tr>
+<tr><td><code>string</code></td><td><code>string</code></td><td><code>.call test_echo {"message":"hello"}</code></td></tr>
+<tr><td><code>integer</code></td><td><code>int</code> / <code>long</code></td><td><code>.call test_add {"a":3,"b":4}</code></td></tr>
+<tr><td><code>float</code></td><td><code>double</code></td><td><code>.call round {"value":3.14}</code></td></tr>
+<tr><td><code>true</code> / <code>false</code></td><td><code>bool</code></td><td><code>.call set_flag {"enabled":true}</code></td></tr>
+<tr><td><code>null</code></td><td><code>null</code></td><td><code>.call clear {"value":null}</code></td></tr>
+<tr><td><code>object</code> / <code>array</code></td><td><code>string</code> (raw JSON)</td><td><code>.call parse {"data":{"key":"val"}}</code></td></tr>
+</table>
+<p>The <code>.call</code> command tests the same code path the AI uses, JSON-RPC → argument marshalling → <code>InvokeScriptFunction</code> → result formatting. Useful for debugging tool behavior without an AI client connected.</p>
+
+<!-- ========================================================================= -->
+<!-- TROUBLESHOOTING -->
+<!-- ========================================================================= -->
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h4>The server ends with no message, or never reaches "server started"</h4>
+<p>A tool script is executed at load, so a script in the tools directory that is not a tool is executed too. The last <code>loading tool=&lt;name&gt;</code> line names the one that did it, and there are two shapes. The process <strong>ends</strong> silently (a native fault; a <code>DebugBreak</code> call, for instance, is reported by the OS as <code>STATUS_BREAKPOINT</code> and cannot be caught), or it <strong>never gets past that line</strong> (a script that waits, loops, or opens a dialog). Move everything that is not a tool out of that directory, or point <code>--tools-dir</code> at a directory that holds only tools.</p>
+
+<h4>Server starts but tools don't appear</h4>
+<p>Check that your script files are in the <code>tools/</code> directory next to <code>ScriptLangCore.exe</code>. The server looks for <code>tools/*.slc</code> relative to the executable path, and <code>--tools-dir</code> overrides it.</p>
+
+<h4>"Unknown tool" errors</h4>
+<p>Make sure <code>RegisterMcpTool</code> is called at the top level of your script, not inside a function. Registration runs when the script is loaded at startup.</p>
+
+<h4>JSON parsing errors</h4>
+<p>Verify the JSON Schema string is valid JSON. Use a linter if unsure. The schema is optional, you can omit it and the AI will infer arguments from the function signature.</p>
+
+<h4>File access denied</h4>
+<p>Either add the file's parent directory with <code>--allowed-dir</code>, or remove <code>--allowed-dir</code> entirely to allow unrestricted access.</p>
+
+<h4>Windows piping</h4>
+<p>On Windows, stdin piping from <code>echo</code> may not work correctly with binary executables. Use <code>type request.json | ScriptLangCore.exe --mcp</code> instead.</p>
+
+<script>
+document.querySelectorAll("pre").forEach(function(pre) {
+  var btn = document.createElement("button");
+  btn.className = "copy-btn";
+  btn.textContent = "Copy";
+  btn.onclick = function() {
+    var code = pre.querySelector("code");
+    var text = code ? code.textContent : pre.textContent;
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(function() { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 2000);
+    });
+  };
+  pre.style.position = "relative";
+  pre.appendChild(btn);
+});
+</script>
+</body>
+</html>

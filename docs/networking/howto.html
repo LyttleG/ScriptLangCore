@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebSocket and file server: How To</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --accent3: #d29922;
+  --code-bg: #1c2128;
+  --inline-code: #f0883e;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+h1 { font-size: 2rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.02em; }
+h1 small { font-size: 1rem; color: var(--text-dim); font-weight: 400; }
+h2 { font-size: 1.4rem; font-weight: 600; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.1rem; font-weight: 600; margin: 28px 0 10px; }
+h4 { font-size: 0.95rem; font-weight: 600; margin: 20px 0 8px; color: var(--accent); }
+p { margin-bottom: 14px; color: var(--text-dim); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+strong { color: var(--text); }
+code {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--inline-code);
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 16px 0;
+  background: rgba(88,166,255,0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-dim);
+}
+blockquote strong { color: var(--text); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 0.85rem;
+}
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+th { background: var(--surface); font-weight: 600; color: var(--text); }
+td { color: var(--text-dim); }
+td code { font-size: 0.8rem; }
+ul, ol { margin: 8px 0 16px 20px; color: var(--text-dim); }
+li { margin-bottom: 4px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.note {
+  background: rgba(56,139,253,0.08);
+  border: 1px solid rgba(56,139,253,0.2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.warn {
+  background: rgba(210,153,34,0.08);
+  border: 1px solid rgba(210,153,34,0.25);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.tag-cli { background: rgba(210,153,34,0.15); color: var(--accent3); }
+.tag-api { background: rgba(63,185,80,0.15); color: var(--accent2); }
+.tag-info { background: rgba(88,166,255,0.15); color: var(--accent); }
+.toc { margin: 16px 0 24px; }
+.toc a { display: inline-block; margin: 2px 12px 2px 0; font-size: 0.88rem; }
+@media (max-width: 600px) {
+  body { padding: 20px 12px 60px; }
+  h1 { font-size: 1.5rem; }
+  table { font-size: 0.78rem; }
+  th, td { padding: 5px 6px; }
+}
+</style>
+</head>
+<body>
+
+<h1>WebSocket and file server <small>How To</small></h1>
+<p>Two namespaces, <code>Server</code> and <code>Client</code>, are a WebSocket server and a WebSocket client written in the engine itself. The server can also answer plain HTTP <code>GET</code> from a folder you name, which makes it a static file server as well, and it runs the same <code>tcp.Use</code> connection middleware the rest of the engine does.</p>
+<p>Where a behaviour is a limit rather than a feature it is stated as one, so that nothing here has to be discovered twice.</p>
+
+<div class="toc">
+<a href="#quick">Quick start</a>
+<a href="#server">Server</a>
+<a href="#client">Client</a>
+<a href="#delivery">How events are delivered</a>
+<a href="#proto">The engine's own messages</a>
+<a href="#files">Serving files on the same port</a>
+<a href="#middleware">Connection middleware</a>
+<a href="#limits">Measured limits</a>
+</div>
+
+<div class="note"><strong>One server per interpreter, and its arguments are fixed at the first <code>Create</code>.</strong> A second <code>Server.Create</code> hands back the FIRST server and ignores the arguments it was given (<code>Create(9702, "local", "two")</code> after <code>Create(9701, "local", "one")</code> answers the same object, still on port 9701 and still named <code>one</code>). Two servers therefore need two processes, or two interpreters.</div>
+
+<h2 id="quick">Quick start</h2>
+<p>A server and a client in one script, both pumped by the same loop. This is the smallest complete round trip: the client is given an id by the server, sends a line, and gets the echo back.</p>
+<pre><code>var port = 9300;
+var svr = Server.Create(port, "local", "probe");
+svr.OnConnect(fun(string id) { print("connect " + id); });
+svr.OnMessage(fun(string id, string msg) { svr.Send(id, "echo:" + msg); });
+svr.Start();
+
+var cli = Client.Create("127.0.0.1", port, 4000);
+cli.OnId(fun(string id) { print("my id is " + id); });
+cli.OnMessage(fun(string msg) { print("got " + msg); });
+cli.Connect();
+cli.Send("hello");
+
+while (true) { svr.Pump(); cli.Pump(); Application.DoEvents(); sleep(50); }</code></pre>
+<p>What that prints on the shipped build: the server's <code>connect</code> line with the id it assigned, the client's <code>my id is</code> line with the same id, and <code>got echo:hello</code>. The <code>Application.DoEvents()</code> is not for the sockets: it is there so the engine's own timers and windows keep running, because a socket pump loop does not dispatch them (see <a href="#delivery">How events are delivered</a>).</p>
+
+<h2 id="server">Server</h2>
+<h3>Create, start, stop</h3>
+<table>
+<tr><th>Member</th><th>Answers</th><th>Does</th></tr>
+<tr><td><code>Server.Create(port [, mode [, name [, rootDir]]])</code></td><td>the server</td><td>Binds the details and returns the interpreter's one server. <code>mode</code> is <code>"local"</code> (default, listens on the loopback address only) or <code>"external"</code> (listens on every interface). <code>name</code> is a label a script can read back. <code>rootDir</code> turns on the file server, see <a href="#files">below</a>.</td></tr>
+<tr><td><code>Start()</code></td><td><code>bool</code></td><td>Starts the accept loop. A missing <code>rootDir</code> or a port already in use is reported through <code>OnError</code> and answers <code>false</code>.</td></tr>
+<tr><td><code>Stop()</code></td><td>nothing</td><td>Stops the accept loop and unhooks the events. It does NOT reset the object, so a later <code>Start()</code> reuses the same port.</td></tr>
+<tr><td><code>IsRunning</code></td><td><code>bool</code></td><td>Whether the accept loop is up.</td></tr>
+<tr><td><code>Port</code>, <code>Id</code>, <code>Name</code></td><td><code>int</code>, <code>string</code>, <code>string?</code></td><td>What the server was created with. <code>Id</code> is generated by the engine.</td></tr>
+</table>
+
+<h3>Events</h3>
+<p>Register them before <code>Start()</code>: the accept loop runs on its own threads and only QUEUES what it sees, so a handler registered later still receives what arrives after it, but anything that arrived first has nobody to answer.</p>
+<table>
+<tr><th>Handler</th><th>Runs when</th></tr>
+<tr><td><code>OnPending(fun(string id))</code></td><td>A client finished the WebSocket handshake and has its id, but has not acknowledged it yet.</td></tr>
+<tr><td><code>OnConnect(fun(string id))</code></td><td>The client acknowledged its id, which is the point where the server counts it. This is the one to use.</td></tr>
+<tr><td><code>OnMessage(fun(string id, string msg))</code></td><td>A text message arrived from that client.</td></tr>
+<tr><td><code>OnDisconnect(fun(string id))</code></td><td>That client is gone, closed or kicked.</td></tr>
+<tr><td><code>OnError(fun(string who, string err))</code></td><td>A listener or connection failure. <code>who</code> is the server or the client id, <code>err</code> is the engine's message.</td></tr>
+</table>
+
+<h3>Sending and inspecting</h3>
+<table>
+<tr><th>Member</th><th>Does</th></tr>
+<tr><td><code>Send(id, text)</code></td><td>Sends one text frame to that client. An unknown id is ignored, not reported.</td></tr>
+<tr><td><code>Broadcast(text [, excludeId])</code></td><td>Sends to every known client, optionally except one (the usual echo-to-everyone-but-the-sender).</td></tr>
+<tr><td><code>Clients()</code></td><td>The registry as a dictionary, id to entry.</td></tr>
+<tr><td><code>ClientCount()</code></td><td>How many clients have ACKNOWLEDGED, i.e. what <code>OnConnect</code> counted.</td></tr>
+<tr><td><code>ClientStatus(id)</code></td><td><code>"Pending"</code>, <code>"Acknowledged"</code>, <code>"Disconnected"</code>, or null for an id the server does not know. A null id is refused rather than answered: read <code>client.Id</code> only after <code>OnId</code> has fired.</td></tr>
+<tr><td><code>ClientKick(id)</code></td><td>Closes that client's stream. The rest of the teardown is the ordinary disconnect path, so the entry stays in <code>Clients()</code> until <code>OnDisconnect</code> has been dispatched (<code>ClientCount()</code> still reads 2 right after a kick).</td></tr>
+<tr><td><code>Remove(id)</code></td><td>Forgets that registry entry now. It answers nothing to a script.</td></tr>
+</table>
+
+<h2 id="client">Client</h2>
+<table>
+<tr><th>Member</th><th>Answers</th><th>Does</th></tr>
+<tr><td><code>Client.Create(host, port [, timeoutMs])</code></td><td>the client</td><td>Binds the connection details. <code>timeoutMs</code> defaults to 15000. <strong>Idempotent per interpreter</strong>, like <code>Server.Create</code>: a second call answers the first client and ignores its arguments, so a script has ONE client and reconnects with <code>Disconnect()</code> then <code>Connect()</code>.</td></tr>
+<tr><td><code>Connect()</code></td><td><code>bool</code>: the handshake's result</td><td>Connects and performs the WebSocket handshake. <code>false</code> means it did not complete, and <code>OnError</code> says why.</td></tr>
+<tr><td><code>IsConnected</code></td><td><code>bool</code></td><td>The live state, which is what a loop polls; it goes false when the server closes the socket.</td></tr>
+<tr><td><code>Id</code></td><td><code>string?</code></td><td>The id the SERVER assigned. It is null until <code>OnId</code> has fired.</td></tr>
+<tr><td><code>Port</code></td><td><code>int</code></td><td>What <code>Create</code> was given.</td></tr>
+<tr><td><code>Send(text)</code></td><td>nothing</td><td>One text frame. A send on a closed client does nothing.</td></tr>
+<tr><td><code>Pump()</code></td><td>nothing</td><td>Runs whatever is queued, then returns.</td></tr>
+<tr><td><code>Wait()</code></td><td>nothing</td><td>Blocks until the client is disconnected, running the queued callbacks as they arrive.</td></tr>
+<tr><td><code>Disconnect()</code>, <code>Dispose()</code></td><td>nothing</td><td>Close the socket. <code>Dispose</code> is <code>Disconnect</code> plus "do not wait for a finalizer", so it is what a <code>using</code> block reaches.</td></tr>
+<tr><td><code>OnId(fun(string id))</code></td><td></td><td>The server assigned this client its id.</td></tr>
+<tr><td><code>OnMessage(fun(string msg))</code></td><td></td><td>A text message arrived.</td></tr>
+<tr><td><code>OnDisconnect(fun())</code></td><td></td><td>The connection ended.</td></tr>
+<tr><td><code>OnError(fun(string err))</code></td><td></td><td>A transport failure, as the engine's message.</td></tr>
+</table>
+
+<div class="note"><strong><code>Connect()</code> answers the WebSocket handshake's result.</strong> <code>true</code> means the socket opened AND the upgrade completed, which is why a refused port, a timeout or a server that answers the handshake with something else all return <code>false</code> and report through <code>OnError</code>. <code>IsConnected</code> stays the property to poll inside a loop, and <code>OnId</code> firing is the moment the session is usable.</div>
+
+<h2 id="delivery">How events are delivered</h2>
+<p>The sockets run on their own threads and never call a script directly. Everything they see is queued, and a script runs the queue with one of three members. The three modes, and what each one gives a script:</p>
+<table>
+<tr><th>Mode</th><th>Member</th><th>Shape</th></tr>
+<tr><td>Blocking server</td><td><code>server.Listen()</code></td><td>Loops until <code>Stop()</code>, running the queued callbacks. Nothing else on that thread runs, so a script that must also do work calls it on its own thread (a <code>Events.Create()</code> producer, <code>feed.Start(fun(EventSubject f, EventSubject s) { svr.Listen(); })</code>). An engine <code>CreateTimer</code> does NOT fire inside it: a timer armed to stop the server never ran, and <code>Listen()</code> never returned.</td></tr>
+<tr><td>Blocking client</td><td><code>client.Wait()</code></td><td>Blocks until that client is disconnected, running the queued callbacks, which is what a command-line client ends with. With a producer thread disconnecting it after 800 ms, <code>Wait</code> returned after 866 ms with the message already delivered.</td></tr>
+<tr><td>Non blocking</td><td><code>server.Pump()</code>, <code>client.Pump()</code></td><td>Runs what is queued and returns, which is the mode for a UI or for a script driving several things at once.</td></tr>
+</table>
+
+<div class="note"><strong>A socket pump loop ticks the engine's timers only when the run owns a window.</strong> With no window up, a 150 ms <code>CreateTimer</code> fires <strong>0</strong> times across 500 ms of <code>svr.Pump(); cli.Pump(); sleep(50);</code> and <strong>8</strong> times in the same loop with <code>Application.DoEvents()</code> added, because the pump that statement boundaries and <code>sleep</code> use does nothing on a thread that owns no window. With a form shown, both variants tick (20 to 24 ticks per second of a 50 ms timer) and <code>Application.DoEvents()</code> is not needed. A UI script therefore pumps all of them in one loop, <code>svr.Pump(); cli.Pump(); Application.DoEvents();</code>, and a headless script adds <code>DoEvents</code> only when it wants timers or events to advance.</div>
+
+<h2 id="proto">The engine's own messages</h2>
+<p>Two messages belong to the protocol itself, and both are handled for you:</p>
+<table>
+<tr><th>Message</th><th>Direction</th><th>Purpose</th></tr>
+<tr><td><code>__id:&lt;id&gt;</code></td><td>Server to client</td><td>Assigns the client its id, which is what makes the server count it.</td></tr>
+<tr><td><code>__ack:&lt;id&gt;</code></td><td>Client to server</td><td>The client's acknowledgement of that id. The engine's client sends it automatically, and a <code>Pending</code> client becomes <code>Acknowledged</code> when it arrives.</td></tr>
+</table>
+<p>Anything else is an ordinary text message, so an application invents its own vocabulary.</p>
+
+<div class="note"><strong>A <code>__</code> name that is not in the table above is the DEMO's, not the engine's.</strong> The chat sample in <code>assets/language/runtime</code> defines <code>__welcome:</code>, <code>__join:</code>, <code>__leave:</code>, <code>__nick:</code>, <code>__ping</code>, <code>__pong</code>, <code>__error:</code>, <code>__rename:</code> and <code>__timeout</code> in its own handlers, on both sides. Copying the protocol means copying the demo's two handlers, not asking the engine for those names.</div>
+
+<h2 id="files">Serving files on the same port</h2>
+<p>Give <code>Server.Create</code> a folder as its fourth argument and the server answers plain HTTP <code>GET</code> from it: <code>GET /file</code> is that file under the folder, <code>GET /</code> or a directory path is its <code>index.html</code>, a path that climbs out of the folder is refused, and anything that is not a <code>GET</code> is refused by method.</p>
+<pre><code>var svr = Server.Create(8080, "external", "site", "D:/www");
+svr.Start();                 // serves D:/www over HTTP on port 8080
+svr.Pump();                  // a file request does not need the script, this only keeps errors flowing</code></pre>
+<p>Against a folder holding one <code>hello.txt</code>:</p>
+<table>
+<tr><th>Request</th><th>Answer</th><th>Body</th></tr>
+<tr><td><code>GET /hello.txt</code></td><td><code>200</code></td><td>the file (19 bytes in the probe)</td></tr>
+<tr><td><code>GET /</code> with no <code>index.html</code></td><td><code>404</code></td><td>the engine's own HTML page (136 bytes)</td></tr>
+<tr><td><code>GET /</code> with an <code>index.html</code></td><td><code>200</code></td><td>that page, which is what makes a folder a site</td></tr>
+<tr><td><code>GET /nope.txt</code></td><td><code>404</code></td><td>the same page</td></tr>
+<tr><td><code>GET /../secret.txt</code></td><td><code>403</code></td><td>the page for it (148 bytes): the path leaves the served folder, and the reason goes to the log</td></tr>
+<tr><td><code>POST /hello.txt</code></td><td><code>405</code></td><td>the engine's page for it (161 bytes), and the reason goes to the log</td></tr>
+</table>
+
+<div class="note"><strong>A server with a <code>rootDir</code> is a file server AND a WebSocket server.</strong> The probe reads the connection's request head and lets the <code>Sec-WebSocket-Key</code> header decide: an upgrade goes to the handshake, anything else that opens with <code>GET /</code> is served from the folder. So one port can be a site and a socket endpoint at once, and a script can hold both on the same server object. Two details worth knowing: the head is read one byte at a time and handed to the handshake, so a client that sends its first frame in the same packet is not truncated, and a peer that sends a plain <code>GET /</code> without an upgrade is a FILE request, which is what a browser sends.</div>
+
+<p>The two roles in one script, which is the shape the probe makes possible:</p>
+<pre><code>var s = Server.Create(8080, "external", "site", "C:/www");
+s.OnMessage(fun(string id, string msg) { s.Send(id, "echo:" + msg); });
+s.Start();   // files under C:/www, and a WebSocket session, on the same port</code></pre>
+
+<h2 id="middleware">Connection middleware</h2>
+<p>Every accepted connection passes through <code>tcp.Use</code> BEFORE the engine reads a byte of it, so a handler can refuse by address or close the connection outright. The context and the two members are documented in the language reference, under <code>tcp.Use</code>; the short shape is:</p>
+<pre><code>tcp.Use(fun(TcpContext ctx, Action next) {
+    if (!ctx.RemoteAddress.StartsWith("127.0.0.1:")) { ctx.Close(); return; }
+    next();
+});</code></pre>
+<p><code>next()</code> lets the connection through to the server's own handling, <code>ctx.Close()</code> stops it and skips the rest of the chain, and <code>ctx.RemoteAddress</code> is the peer endpoint as <code>host:port</code>. The middleware belongs to the interpreter that started the server, so one registered after <code>Start()</code> still applies to the next connection.</p>
+
+<h2 id="limits">Measured limits</h2>
+<p>Each of these is how the shipped build behaves:</p>
+<ul>
+<li><code>Server.Create</code> is idempotent: later arguments are ignored (port, name and <code>rootDir</code> all stay as the first call set them).</li>
+<li><code>Client.Create</code> is idempotent too, so a script holds ONE client per interpreter: a second call answers the first one, and its host and port stay those of the first call. Reconnect with <code>Disconnect()</code> then <code>Connect()</code>.</li>
+<li><code>Client.Connect()</code> answers the handshake's result: <code>false</code> for a closed port, a timeout or a server that does not upgrade (each also reported through <code>OnError</code>), and <code>IsConnected</code> plus <code>OnId</code> are what a loop polls.</li>
+<li><code>Server.Listen()</code>, <code>Client.Wait()</code> and <code>Client.Connect()</code> keep the run ALIVE while they wait: each pumps its own slices the way <code>sleep</code> does, so a form the run owns stays responsive, a <code>CreateTimer</code> fires (which is what lets a timer stop a <code>Listen()</code> loop), and a <code>runThread</code> event feed keeps being delivered (measured during a 715 ms <code>Wait()</code>: all 10 published values arrived). A handler can therefore run while the script is inside one of them, which is the contract <code>sleep</code> already has: keep such a handler short, and do not assume the statement after the call runs before it.</li>
+<li>A <code>ClientStatus(id)</code> call with a null id is refused by the engine; the id exists only after <code>OnId</code>.</li>
+<li><code>ClientKick(id)</code> closes the stream and leaves the registry entry to the ordinary disconnect path, so <code>ClientCount()</code> lags it by one dispatch.</li>
+<li><code>client.Name</code> is a placeholder in this build: it always answers <code>"Test"</code>. Read <code>client.Id</code> for the identity the server knows.</li>
+<li>A message is a text frame. There is no binary door on this surface, and a large message is not chunked for you.</li>
+</ul>
+
+<h2>Demos</h2>
+<p>Three samples in <code>assets/language/runtime</code>, run by the engine like any other script:</p>
+<table>
+<tr><th>File</th><th>What it shows</th></tr>
+<tr><td><code>ws_chat_server.slc</code></td><td>A chat server: ids, nicknames, broadcasts, whispers, keep-alive, and the <code>__</code> protocol it invents for its clients.</td></tr>
+<tr><td><code>ws_chat_client.slc</code></td><td>The matching console client: <code>Wait()</code> in a pump loop, and both sides of that protocol.</td></tr>
+<tr><td><code>ws_chat_gui.slc</code></td><td>The same client with a form, which is the <code>Pump()</code> plus <code>Application.DoEvents()</code> shape.</td></tr>
+</table>
+<p>The language reference documents the two namespaces' members in their own entries (<code>Server</code>, <code>Client</code>, <code>ClientStatus</code>) beside <code>tcp.Use</code>, and the run-time details of a form that hosts one live in the <code>Application</code> entry.</p>
+
+</body>
+</html>

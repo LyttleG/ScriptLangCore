@@ -154,7 +154,7 @@
 <div class="download">
   <!-- THE REPOSITORY URL IS WRITTEN HERE, ONCE. The three links below carry only a path, and the script at the
        bottom of the page composes them from this href, so renaming the repository means editing this one string.
-       With scripting off the download still works and the three extras keep no link, which is a graceful loss. -->
+       With scripting off the download still works and the three extras keep no link, which is a graceful loss. -->	   
   <a class="button" id="download" href="https://github.com/LyttleG/ScriptLangCore/releases/download/ScriptLangCore/ScriptLangCoreSetup.exe">Download ScriptLangCoreSetup.exe</a>
   <p><strong>The installer</strong> puts the engine, the launcher and the script folders on the machine, and adds the command to the path.</p>
   <p>Other ways in: <a data-repo-path="releases">all releases</a>,
@@ -166,7 +166,7 @@
 <p><strong>ScriptLangCore</strong> runs <code>.slc</code> scripts, a C#-flavoured language with classes, interfaces, generics, structs, tuples, pattern matching, lambdas, coroutines, <code>async</code>/<code>await</code>, exceptions and a full Windows UI toolkit. A script is a text file; the engine lexes it, parses it into an AST, and runs it on one of two engines: a bytecode virtual machine for the bodies it can compile, and a tree walker for every shape it cannot, so a script never depends on what the compiler accepted.</p>
 <p>The runtime is NativeAOT: the .NET runtime is inside the executable, so a machine needs Windows and nothing else, with no .NET installation, no Visual C++ redistributable and no Universal CRT redistributable. The engine itself is written in C# and reaches Windows through flat P/Invoke calls rather than through a framework on top.</p>
 
-<h2 id="shapes">Four shapes, one engine</h2>
+<h2 id="shapes">Five shapes, one engine</h2>
 <div class="shapes">
   <div class="shape">
     <h3>The command line: <code>ScriptLangCore.exe</code></h3>
@@ -178,11 +178,15 @@
   </div>
   <div class="shape">
     <h3>The launcher: <code>ScriptLangCore.Launcher.exe</code></h3>
-    <p>A 1.2 MB shortcut onto the engine's own entry point, so a script can be packaged into its own Windows executable with the engine beside it. <span class="size">1.1 MB.</span></p>
+    <p>A 19 KB shortcut onto the engine's own entry point, in C, so a script can be packaged into its own Windows executable with the engine beside it. <span class="size">18 KB.</span></p>
   </div>
   <div class="shape">
     <h3>Inside SQLite: the same DLL</h3>
     <p><code>.load</code> the DLL into any 64-bit <code>sqlite3</code> and six functions appear, so SQL can evaluate a script expression over a row, fold a set, or map a list. <span class="size">no extra install.</span></p>
+  </div>
+  <div class="shape">
+    <h3>Inside Excel: the VBA module</h3>
+    <p>64-bit Office calls the DLL directly, because on Windows x64 there is one calling convention and nothing to shim, and <code>assets\language\stdcall\</code> supplies the rest: a standard module, two class modules and a workbook you can open and run. A macro or a cell formula evaluates an expression, runs a script from text or a file, defines one so its functions call like VBA functions, and reads the verdict as an object with <code>Ok</code>, <code>Status</code>, <code>Code</code>, <code>Message</code> and its position. <span class="size">32 KB of VBA, no engine copy.</span></p>
   </div>
 </div>
 

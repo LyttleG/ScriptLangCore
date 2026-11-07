@@ -1,1 +1,536 @@
+/* ============================================================
+   ScriptLangCore, Language Reference Styles
+   MDN-inspired theme
+   ============================================================ */
 
+:root {
+  /* Backgrounds aligned with docs/embed/howto.html, so the two pages sit on one surface:
+     page 0d1117, panels 161b22, hover and code 1c2128, rules 30363d. Text, accent and syntax stay. */
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: #161b22;
+  --bg-card-hover: #1c2128;
+  --bg-search: #1c2128;
+  --border: #30363d;
+  --text-primary: #e0e0e0;
+  --text-secondary: #aaa;
+  --text-muted: #666;
+  --accent: #4ea1ff;
+  --accent-dim: #2a5f9e;
+  --keyword: #c792ea;
+  --string: #c3e88d;
+  --number: #f78c6c;
+  --function: #82aaff;
+  --comment: #546e7a;
+  --type-color: #ffcb6b;
+  --warning: #ffa726;
+  --error: #ef5350;
+  --success: #66bb6a;
+  --code-bg: #1c2128;
+  --max-width: 1200px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+/* ── Header ───────────────────────────────────────────── */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+header h1 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+header h1 small { font-size: 0.75rem; color: var(--text-secondary); font-weight: 400; }
+
+.search-box {
+  flex: 0 1 300px;
+  min-width: 140px;
+  position: relative;
+}
+
+.header-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.header-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: var(--bg-card-hover);
+}
+
+.search-box input {
+  width: 100%;
+  padding: 8px 12px 8px 36px;
+  background: var(--bg-search);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-box input:focus { border-color: var(--accent); }
+.search-box input::placeholder { color: var(--text-muted); }
+
+.search-box .icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.search-stats {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ── Layout ────────────────────────────────────────────── */
+.layout { display: flex; }
+
+/* ── Sidebar ───────────────────────────────────────────── */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  padding: 16px 12px;
+  border-right: 1px solid var(--border);
+}
+
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.sidebar h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  margin: 16px 4px 4px;
+}
+
+.sidebar h3:first-child { margin-top: 0; }
+
+.sidebar a {
+  padding: 0 4px 4px 0;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.82rem;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.sidebar a:hover, .sidebar a.active {
+  background: var(--accent-dim);
+  color: #fff;
+}
+
+/* ── Main content ──────────────────────────────────────── */
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 32px 24px 48px;
+}
+
+/* ── Category sections ─────────────────────────────────── */
+.category {
+  margin-bottom: 32px;
+}
+
+.category h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category h2 .toggle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.category h2 .toggle.collapsed { transform: rotate(-90deg); }
+
+.category.collapsed .entry-list { display: none; }
+
+/* ── Entry cards ───────────────────────────────────────── */
+.entry-list { display: flex; flex-direction: column; gap: 8px; }
+
+.entry {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.entry:hover { background: var(--bg-card-hover); border-color: var(--accent-dim); }
+
+.entry-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.entry-name {
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--function);
+}
+
+.entry-tag {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.tag-keyword   { background: #3a1a5e; color: var(--keyword); }
+.tag-function  { background: #1a2a5e; color: var(--function); }
+.tag-linq      { background: #1a3a2e; color: var(--string); }
+.tag-bitwise   { background: #3a2a1a; color: var(--number); }
+.tag-command   { background: #2a2a2a; color: var(--warning); }
+
+.entry-desc {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.entry-body {
+  display: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.entry.open .entry-body { display: block; }
+/* A DEEP LINK OPENS THE ENTRY BY ITSELF, so `#Com` in the sidebar works even when the page's script does not run (or
+   when its anchors were the only thing the script used to create). Every entry carries its id in the markup for the same
+   reason, and tools/check-doc-nav.sh now requires that a sidebar link has a real id to land on. */
+.entry:target .entry-body { display: block; }
+
+.entry-body p { font-size: 0.88rem; margin-bottom: 8px; }
+
+.code-block {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.code-block .copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+  z-index: 2;
+}
+
+.code-block:hover .copy-btn { opacity: 1; }
+
+.code-block .copy-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.code-block .copy-btn.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.entry-body .syntax {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.entry-body .example {
+  background: var(--code-bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 10px 14px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.82rem;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+  color: var(--text-primary);
+}
+
+.entry-body .note {
+  font-size: 0.82rem;
+  background: #2a2010;
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-top: 6px;
+}
+
+.entry-body .note ul {
+  padding-left: 24px;
+}
+
+.entry-body .note ul li {
+  margin: 4px 0 4px 8px;
+  padding-left: 20px;
+  list-style-position: outside;
+}
+
+.entry-body li {
+  margin: 0 0 0 16px;
+  padding-left: 4px;
+}
+
+.entry-body .note {
+  position: relative;
+}
+
+.entry-body .note .copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.entry-body .note:hover .copy-btn {
+  opacity: 1;
+}
+
+.entry-body .note .copy-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.entry-body .note .copy-btn.copied {
+  color: var(--success);
+}
+
+/* ── Hidden entries (search filter) ────────────────────── */
+.entry.hidden { display: none; }
+.category.hidden { display: none; }
+
+/* ── Tables ─────────────────────────────────────────────── */
+.entry-body table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  margin: 8px 0;
+}
+
+table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--accent);
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+
+table td {
+  padding: 6px 12px;
+  vertical-align: middle;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+table tr:nth-child(even) td {
+  background: rgba(255,255,255,0.04);
+}
+
+table tr:hover td {
+  background: rgba(78,161,255,0.06);
+}
+
+/* Two-column tables: name+description pattern */
+.entry-body table.cols-2 td:first-child,
+.entry-body table:not(.cols-3) td:first-child {
+  width: 35%;
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--function);
+  word-break: break-word;
+}
+
+/* Three-column tables */
+.entry-body table.cols-3 td:nth-child(1) { width: 25%; font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 0.82rem; color: var(--function); }
+.entry-body table.cols-3 td:nth-child(2) { width: 30%; font-size: 0.82rem; color: var(--keyword); }
+.entry-body table.cols-3 td:nth-child(3) { width: 45%; }
+
+/* Right-aligned numeric columns, never wrap a number or a unit, and shrink the column to its content so the
+   wide text columns absorb the slack instead of squeezing the digits (width:1% is the table-cell idiom for
+   "as narrow as my content allows"). */
+.entry-body table td.num, .entry-body table th.num {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+/* ── Inline code styling ────────────────────────────────── */
+code {
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: 0.88em;
+  color: var(--function);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* A LONG REFUSAL MESSAGE IN A TABLE CELL IS PROSE, NOT A CHIP. The `nowrap` above keeps a span like
+   `<code>int area();</code>` from breaking across lines, which is right, but a message quoted in a cell
+   (`Expected '(' after the name of a method, ...`, 150 characters) then stays on ONE line: a `nowrap` element
+   ignores the cell's own `overflow-wrap`, so that single cell widened the whole table past the window. The
+   descendant selector below is more specific than the bare `code` rule, so it wins, and a short span is
+   unaffected because there is nothing to break. */
+table td code, table th code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Code inside notes, keep readable */
+.note code {
+  color: var(--warning);
+}
+
+/* Clickable code, subtle hover feedback */
+.entry-body code:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent-dim);
+}
+
+/* Code inside tables, compact */
+td code {
+  font-size: 0.85em;
+  padding: 0 3px;
+}
+.no-results {
+  display: none;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.no-results.visible { display: block; }
+
+.no-results h3 { font-size: 1.2rem; margin-bottom: 8px; }
+
+/* ── Syntax coloring inside example blocks ─────────────── */
+.kw { color: var(--keyword); }
+.fn { color: var(--function); }
+.str { color: var(--string); }
+.num { color: var(--number); }
+.cmt { color: var(--comment); font-style: italic; }
+.typ { color: var(--type-color); }
+.op { color: var(--warning); }
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+.main::-webkit-scrollbar { width: 8px; }
+.main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .main { padding: 16px; }
+  header { padding: 10px 16px; }
+  header h1 { font-size: 1rem; }
+}
+
+/* ── Search highlights ───────────────────────────────────────────────────────
+   Readable on the dark theme: a bright fill with DARK text, which is what a
+   browser's own find does rather than tinting whatever colour it lands on. */
+mark.hit { background: #ffd54a; color: #1a1a1a; border-radius: 2px; padding: 0 1px; }
+mark.hit.current { background: #ff9f1c; box-shadow: 0 0 0 1px #b26a00; }
+
+/* ── Verdict marks in a comparison table ─────────────────────────────────────
+   A green check for what a language supports, a red cross for what it does not.
+   Colored explicitly (rather than left to an emoji font) so they read the same
+   in every browser, and bolded so a skim finds them before the clause. */
+.verdict-ok { color: #3fb950; font-weight: 700; }
+.verdict-no { color: #e5534b; font-weight: 700; }
+/* A third state: allowed, but by a DIFFERENT rule than C# (the cell says how). */
+.verdict-warn { color: #d29922; font-weight: 700; }
+/* A COMPARISON table (Feature / C# / this language). The third column is the wordy one, so without declared widths
+   the browser hands it whatever it asks for and squeezes the feature label and the C# column. Fixed layout plus a
+   colgroup makes the three columns the sizes below, whatever the text is, and `top` keeps a two-line label beside
+   its verdict marks. */
+table.cmp-table { table-layout: fixed; width: 100%; }
+table.cmp-table td { vertical-align: top; overflow-wrap: break-word; }
+table.cmp-table col.cmp-feature { width: 24%; }
+table.cmp-table col.cmp-csharp { width: 15%; }
+table.cmp-table col.cmp-slc { width: 61%; }

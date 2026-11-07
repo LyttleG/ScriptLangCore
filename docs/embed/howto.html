@@ -127,7 +127,7 @@ pre:hover .copy-btn { opacity: 1; }
 <body>
 
 <h1>Embedding the engine <small>How To</small></h1>
-<p>This engine ships in three shapes. The <strong>CLI</strong> (<code>ScriptLangCore.exe</code>, 19.6 MB) does everything by itself. The <strong>shared library</strong> (<code>ScriptLangCore.dll</code>, 19.1 MB) exposes a C ABI of sixteen calls, for a native program that wants to run scripts inside its own process. The <strong>launcher</strong> (<code>ScriptLangCore.Launcher.exe</code>, 1.3 MB) holds no engine code at all: it loads the library and drives it, and it doubles as the smallest complete example of the ABI.</p>
+<p>This engine ships in three shapes. The <strong>CLI</strong> (<code>ScriptLangCore.exe</code>, 19.6 MB) does everything by itself. The <strong>shared library</strong> (<code>ScriptLangCore.dll</code>, 19.1 MB) exposes a C ABI of sixteen calls, for a native program that wants to run scripts inside its own process. The <strong>launcher</strong> (<code>ScriptLangCore.Launcher.exe</code>, 19 KB) holds no engine code at all: it loads the library and drives it, and it doubles as the smallest complete example of the ABI. A host does not have to be a C or .NET program either: <a href="#hosts">Python, PowerShell and bash</a> take the same library, <a href="#managed">C# takes it with no generated interop</a>, and <a href="#vba">64-bit Excel and VBA call it directly</a>, with a module that ships beside it.</p>
 
 <div class="note"><strong>The library is the engine, not a wrapper.</strong> It is the same NativeAOT image the exe is built from, compiled as a shared library with the exports marked <code>[UnmanagedCallersOnly]</code>. Nothing is interpreted a second time and no second runtime is started, so a script answered through the ABI behaves as it does from the command line, crashes and depth guard included.</div>
 
@@ -148,6 +148,7 @@ pre:hover .copy-btn { opacity: 1; }
 <li><a href="#managed">Embedding from C# and .NET</a></li>
 <li><a href="#sqlite">SQLite as a third door</a></li>
 <li><a href="#hosts">Hosts that are not C: Python, PowerShell, bash</a></li>
+<li><a href="#vba">Driving it from Excel and VBA</a></li>
 <li><a href="#limits">Limits, stated plainly</a></li>
 <li><a href="#verifying">Verifying an artifact</a></li>
 <li><a href="#trouble">Troubleshooting</a></li>
@@ -182,8 +183,14 @@ pre:hover .copy-btn { opacity: 1; }
 <tr><th>Artifact</th><th>Command</th><th>Lands in</th></tr>
 <tr><td><code>ScriptLangCore.exe</code></td><td><code>dotnet publish ScriptLangCore.csproj -c Release -r win-x64 --self-contained</code></td><td><code>publish-aot\</code></td></tr>
 <tr><td><code>ScriptLangCore.dll</code></td><td><code>dotnet publish ScriptLangCore.csproj -c Embed -r win-x64 --self-contained -o publish-dll</code></td><td><code>publish-dll\</code></td></tr>
-<tr><td><code>ScriptLangCore.Launcher.exe</code></td><td><code>dotnet publish src\embed\launcher\EmbedLauncher.csproj -c Launcher -r win-x64 --self-contained -o publish-launcher</code></td><td><code>publish-launcher\</code></td></tr>
+<tr><td><code>ScriptLangCore.Launcher.exe</code></td><td><code>src\embed\launcher-c\build.bat publish-launcher\ScriptLangCore.Launcher.exe</code></td><td><code>publish-launcher\</code></td></tr>
 </table>
+
+<p>The launcher is written in C and built by GCC, because its own work is a DLL load, ten export lookups, one resource read and two string builders: the NativeAOT version of the same program carried a 1.2 MB runtime for that, and this one is 19 KB. Two measurements took it there from the 60 KB the first GCC build produced: three sites asked the C runtime for a format string, which pulled 26 KB of formatted-output machinery in for four hex digits and a decimal, and the CRT itself was then dropped (`-nostartfiles -nostdlib`, with the allocator and the string helpers that mattered written out in the source), so the image now links only kernel32 and shell32. It is behaviour-identical, message for message, since <code>tools/embed-check.sh</code> pins both the words and the exit codes of every refusal, and the C# original it was ported from stays in <code>src\embed\launcher\</code> as the reference. <strong>An x86_64 GCC is required</strong>, and the build refuses a 32-bit one by name: a 32-bit image cannot load the <code>win-x64</code> engine at all, and Windows reports that as "the specified module could not be found", which reads like a missing engine. Point <code>SLC_MINGW_BIN</code> at a toolchain folder to choose one explicitly (a folder that does not hold a usable x86_64 compiler is then refused rather than skipped). The build script also puts the toolchain's own folder on <code>PATH</code> for the compile (its <code>cc1</code> loads its DLLs from there, and without it <code>gcc</code> exits 1 and says nothing), then verifies the image it produced, naming the machine and subsystem bytes.</p>
+
+<pre><code>C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed mingw-w64-x86_64-gcc"
+src\embed\launcher-c\build.bat                 REM into src\embed\launcher-c\build\
+src\embed\launcher-c\build.bat out\App.exe     REM or exactly where you want it</code></pre>
 
 <p>The library is published with <code>NativeLib=Shared</code> and <code>OutputType=Library</code>, which the <code>Embed</code> configuration states. An image without exports answers nothing: the export list is written to <code>obj\Embed\net11.0\win-x64\native\ScriptLangCore.def</code> and lists all sixteen names, which is the cheapest way to confirm a build is the one you think it is.</p>
 
@@ -263,6 +270,10 @@ int main(int argc, char** argv)
 <tr><td><code>slc_last_error</code></td><td><code>int slc_last_error(int64_t h, char* buf, int cap)</code></td><td>one sentence, or empty when the last call succeeded</td></tr>
 <tr><td><code>slc_last_result</code></td><td><code>int slc_last_result(int64_t h, char* buf, int cap)</code></td><td>the last run or call as JSON</td></tr>
 <tr><td><code>slc_stats</code></td><td><code>int slc_stats(int64_t h, char* buf, int cap)</code></td><td>a JSON snapshot of the session</td></tr>
+<tr><td><code>slc_adopt</code></td><td><code>int slc_adopt(int64_t h, void* dispatch)</code></td><td>0 registered, 2 when the pointer is missing; called on the HOST's thread, so a script reaches the object with <code>Com.Host()</code></td></tr>
+<tr><td><code>slc_run_text_async</code></td><td><code>int slc_run_text_async(int64_t h, const char* source, const char* name)</code></td><td>0 accepted, 2 refused: the run is started and not waited for, and <code>slc_poll</code> reports it</td></tr>
+<tr><td><code>slc_run_file_async</code></td><td><code>int slc_run_file_async(int64_t h, const char* path)</code></td><td>the same, for a file</td></tr>
+<tr><td><code>slc_poll</code></td><td><code>int slc_poll(int64_t h)</code></td><td>1 while an asynchronous run is in flight, 0 idle, negative for an unknown handle</td></tr>
 </table>
 
 <p>Four rules decide the rest. <strong>Nothing throws across the boundary</strong>: a failure is a status plus a message, never a C++ exception, a stack trace or a resource key. <strong>One call at a time per handle</strong>: a verb names its refusal when another is in flight rather than interleaving. <strong>Handles are never reused</strong>: a stale handle answers "no session with that handle" instead of hitting a new session. <strong>The host's console is never touched</strong>: with no callback registered, a script's output is dropped rather than written into your stdout.</p>
@@ -273,7 +284,7 @@ int main(int argc, char** argv)
 <p><code>slc_repl</code> runs exactly the loop <code>ScriptLangCore.exe</code> opens with no arguments: the same banner and prompt, the same dot commands (<code>.help</code>, <code>.vars</code>, <code>.run</code>, <code>.gc</code>, <code>.export</code>, <code>.exit</code>, and the rest), the same history and the same Ctrl+C behaviour. A host that wants a console front end therefore needs no REPL of its own, which is what the launcher does with no arguments.</p>
 
 <pre><code>ScriptLangCore.Launcher.exe
-ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 3
+ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 4
 &gt;&gt;&gt; 1 + 1
 = 2
 &gt;&gt;&gt; print("hello from the engine")
@@ -390,7 +401,7 @@ app.exe first second</code></pre>
 
 <p><strong>From a session, pass the tool its arguments after <code>--</code>:</strong> <code>.run assets\language\probes\slc-pack.slc -- ScriptLangCore.Launcher.exe app.slc app.exe --version 1.2.3.4</code>. Everything after the separator is the SCRIPT's command line (<code>Application.Args</code> is its own path plus those words, quoted ones kept whole), so a tool whose input is its argv needs no second form and no wrapper script.</p>
 
-<p><strong>The app can name itself.</strong> <code>--icon</code> replaces the launcher's own icon: each image of the given <code>.ico</code> becomes an <code>RT_ICON</code> under the launcher's group id (32512, the id .NET's <code>&lt;ApplicationIcon&gt;</code> uses, so Explorer and the taskbar read it with no shell work), and the image bytes are the file's own. <code>--version</code> writes a minimal <code>VS_VERSIONINFO</code> carrying <code>VS_FIXEDFILEINFO</code>, which is the part that answers "File version" in the properties dialog and <code>FileVersionInfo.FileMajorPart</code> and friends; there is no <code>StringFileInfo</code>, so the company and product strings still read empty, and that is the one field to add if you need them.</p>
+<p><strong>The app can name itself.</strong> <code>--icon</code> replaces the launcher's own icon: each image of the given <code>.ico</code> becomes an <code>RT_ICON</code> under the launcher's group id (32512, the id .NET's <code>&lt;ApplicationIcon&gt;</code> uses, so Explorer and the taskbar read it with no shell work), and the image bytes are the file's own. <strong>The copy always carries a version resource, and it describes the APP rather than the launcher it came from</strong>: the four numbers come from <code>--version</code> when it is given and from the launcher's own <code>VS_FIXEDFILEINFO</code> otherwise (so a copy declares the engine version it contains instead of inventing one), and the strings name the app, which is what a right-click shows. Concretely, packaging <code>app.slc</code> into <code>app.exe</code> gives <code>FileDescription</code> and <code>ProductName</code> <code>app</code>, <code>OriginalFilename</code> <code>app.exe</code>, and <code>Comments</code> naming the payload it was built from, in an English-Unicode string table (040904b0) with the matching <code>VarFileInfo</code> translation. Leaving it out is what an earlier version did, and it read wrong either way on a launcher that carries strings of its own: without <code>--version</code> the copy claimed <code>ProductName = ScriptLangCore</code>, and with it a numbers-only blob replaced the whole resource, so the description and product name read empty.</p>
 
 <p><strong>A packaged exe is still the CLI when asked.</strong> Its payload runs for its OWN arguments, and an argument the engine's dispatch owns (<code>--compile</code>, <code>--repl</code>, <code>--dump-bytecode</code>, <code>--mcp</code>, <code>--mcp-bc</code>) takes over exactly as it would on the unpacked launcher, so a packaged app can compile a file or open the REPL. The launcher asks the engine (`slc_main_owns`) rather than keeping a list of its own, which is why a flag added to the engine works in a packaged app the day it lands, and why a flag the APP invents (<code>--verbose</code>) still reaches the app.</p>
 
@@ -424,7 +435,7 @@ exe a launcher copy already is). The launcher is SEARCHED for rather than named,
 and the subsystem byte as the file now answers it, so a package is reported by what it IS rather than by what the calls
 returned. Its headless self-test packages the subject both ways, verifies each copy and deletes its own artifact.</p>
 <h2 id="launcher">The launcher</h2>
-<p><code>publish-launcher\</code> holds a 1.3 MB exe with no engine in it, plus the DLL and its <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> beside it, so the folder runs as published:</p>
+<p><code>publish-launcher\</code> holds a 19 KB C exe with no engine in it, plus the DLL and its <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> beside it, so the folder runs as published:</p>
 
 <pre><code>ScriptLangCore.Launcher.exe myscript.slc arg1 arg2
 ScriptLangCore.Launcher.exe a_bundle.slcbc</code></pre>
@@ -474,7 +485,7 @@ PerMonitorV2 awareness have to be this image's. Without it a UI script fails wit
 <p><strong>The engine's folder becomes the session's home</strong> , which is what makes a shared engine work: <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> live with the DLL it was published beside. One consequence is worth stating because it is visible from a script: <code>Application.Path</code> reports that folder, so a run against <code>C:\Tools\ScriptLangCore</code> answers <code>Application.Path = C:\Tools\ScriptLangCore</code> even though the exe is elsewhere. A packaged app's own files are still found beside the APP, through <code>./</code> and <code>Script.Directory()</code>, which name the exe's folder.</p>
 
 <h2 id="managed">Embedding from C# and .NET</h2>
-<p>Nothing here is C-specific: the ABI is fifteen plain exports, so a managed host binds them with <code>NativeLibrary</code> and delegates, and needs no generated interop. This is the whole of it, and it prints <code>engine: ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 2</code>, <code>status: 0</code>, the script's two lines and its outcome JSON:</p>
+<p>Nothing here is C-specific: the ABI is twenty plain exports, so a managed host binds them with <code>NativeLibrary</code> and delegates, and needs no generated interop. This is the whole of it, and it prints <code>engine: ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 2</code>, <code>status: 0</code>, the script's two lines and its outcome JSON:</p>
 
 <pre><code>using System;
 using System.Collections.Generic;
@@ -776,7 +787,7 @@ dll.slc_version.restype = ctypes.c_int
 dll.slc_version.argtypes = [ctypes.c_char_p, ctypes.c_int]
 buf = ctypes.create_string_buffer(256)
 dll.slc_version(buf, 256)
-print(buf.value.decode())                   # ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 3
+print(buf.value.decode())                   # ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 4
 
 dll.slc_create.restype = ctypes.c_longlong
 dll.slc_create.argtypes = [ctypes.c_char_p]
@@ -852,7 +863,7 @@ public static class Slc {
 "@
 $buf = New-Object byte[] 256
 [Slc]::slc_version($buf, 256) | Out-Null
-[Slc]::Text($buf)                                    # ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 3
+[Slc]::Text($buf)                                    # ScriptLangCore 1.0.0.0 (NativeAOT), embed ABI 4
 
 $h = [Slc]::slc_create([Slc]::U8('{"home":"C:\\apps\\engine"}'))
 [Slc]::slc_set_output($h, [Runtime.InteropServices.Marshal]::GetFunctionPointerForDelegate([Slc]::Callback), [IntPtr]::Zero) | Out-Null
@@ -889,6 +900,76 @@ $SQLITE :memory: \
 <li><b>A terminated statement.</b> <code>slc_run_text</code> takes source text, and a statement needs its <code>;</code>: <code>print("hi")</code> is refused with <code>Expect ';' after expression</code>, the same rule a piped REPL line follows.</li>
 </ol>
 <p>A host that loads the DLL also inherits the engine's process-wide facts, the same ones the <a href="#limits">limits</a> section states for C: one GC and one crash domain, a session per thread, and a run inside a native call that cannot be interrupted. A native named library is looked for <b>beside the executable</b>, so a host whose process is not the engine must load it first: <code>LoadLibrary("C:/apps/engine/sqlite3.dll")</code> in script, or <code>LoadLibrary</code> through the host's own FFI, before <code>Sqlite.OpenDb</code> can succeed.</p>
+
+<h2 id="vba">Driving it from Excel and VBA</h2>
+<p>64-bit Office calls the engine DLL with nothing in between. On Windows x64 there is one calling convention, so the cdecl-versus-stdcall question that matters on a 32-bit host does not arise, and a <code>PtrSafe</code> declaration reaches the exported functions directly. What a VBA host does need is help with three things the C ABI deliberately leaves to the caller, and that is what <code>assets\language\stdcall\</code> ships: one standard module, two class modules and a workbook example.</p>
+<p><strong>What that puts in reach of a VBA programmer</strong> is the engine's whole surface, from a macro or a cell formula: an EXPRESSION evaluated in one call (<code>EngineEval("2 + 2")</code>, and <code>=EngineVersion()</code> as a live worksheet formula), a SCRIPT run as text or as a file with its answer read back as a string (<code>EngineRun</code>, <code>EngineRunFile</code>), a script DEFINED once so its functions can be called from VBA like VBA functions (<code>EngineRun</code> then <code>EngineCall("twice", "[21]")</code>, or <code>StdCallDemo.Define</code> then <code>CallFunction</code>), and the run's VERDICT as an object rather than a sentence to parse (<code>ScriptResult</code>: <code>Ok</code>, <code>Status</code>, <code>Code</code>, <code>Message</code>, <code>Line</code>, <code>Column</code>, <code>ResultText</code>, <code>Frames</code>, <code>Summary</code>), with the session living as long as the module, or as long as the class instance that made it. A script that refuses is a verdict a macro can branch on and report, never a VBA error to trap, and <code>exitcode</code> belongs to that verdict, so a script that sets it is not <code>Ok</code> even when it also returns a value.</p>
+<div class="note"><strong>32-bit Office cannot load this DLL.</strong> The published engine is a PE32+ x64 image and the runtime targets x64 and arm64 only, so a 32-bit Excel has nothing to call, wrapper or not. The module keeps every public name working there and answers one sentence saying so, because the message Windows gives for a 32-bit host ("Bad DLL calling convention", or runtime error 48) sends a reader after the wrong problem.</div>
+
+<h3>What the three files are</h3>
+<table>
+<tr><th>File</th><th>What it gives you</th></tr>
+<tr><td><code>StdCall.bas</code></td><td>The declarations, the UTF-16 to UTF-8 conversion, one engine session per caller, <code>EngineRun</code>, <code>EngineEval</code>, <code>EngineCall</code>, <code>EngineVerdict</code>, <code>EngineRelease</code>, and <code>RunAll</code>, which is the module's own self-test.</td></tr>
+<tr><td><code>StdCallDemo.cls</code></td><td>A class front for a workbook: <code>Define</code> a script once, then <code>RunScript</code>, <code>Evaluate_</code>, <code>CallFunction</code> and <code>LastResult</code>. The session is created when the object is and released when it goes.</td></tr>
+<tr><td><code>ScriptResult.cls</code></td><td>The engine's answer as an object: <code>Ok</code>, <code>Status</code>, <code>Code</code>, <code>Message</code>, <code>Line</code>, <code>Column</code>, <code>ResultText</code>, <code>Frames</code>, <code>Summary</code>, and the raw <code>Json</code>.</td></tr>
+<tr><td><code>StdCallExample.xlsm</code></td><td>A workbook with all three imported, a live <code>=EngineVersion()</code> formula, and three macros: <code>DemoRun</code> and <code>RunSelfTest</code>, plus <code>DemoHost</code>, which drives the workbook it lives in through <code>Com.Host()</code>.</td></tr>
+</table>
+<p>Import them with <code>File &gt; Import File...</code> in the VBA editor. <code>StdCall.bas</code> is the only required file: the two classes are what make calling code read well, and they depend on the module, never the other way round.</p>
+
+<h3>Where the DLL has to be</h3>
+<p>The module declares <code>Lib "ScriptLangCore.dll"</code> by name, so Windows' own search must find it. The installer's layout answers that: the engine lives in <code>{app}\bin</code> and the installer puts that folder on <code>PATH</code>. To pin a machine instead, replace the name in the ten <code>Declare</code> statements with a full path in double quotes.</p>
+<p><strong>A hosted Excel does not inherit the environment of whatever started it</strong>, so its search uses the MACHINE's <code>PATH</code> and not the caller's. Measured on a box with the engine installed: a run that had put a freshly published folder first on its own <code>PATH</code> still loaded the installed engine, and the first call to an export that build lacked failed with <code>error 453: cannot find entry point in ScriptLangCore.dll</code>; with no engine on that path at all the answer is <code>error 53</code>. The module answers both with one sentence naming the DLL it could not use and the two ways out, because a bare VBA number sends a reader after the wrong problem. Pin the full path when a workbook must run a particular build, which is what <code>tools\vba-check.ps1</code> does with a copy of the module.</p>
+<p>The engine resolves its <code>assets\</code>, <code>tools\</code> and <code>sqlite3.dll</code> beside the DLL, not beside the workbook, and a bare relative path in a script resolves against the process's current directory, which for Excel is its own default folder. Use <code>Script.Directory()</code> inside a script, or an absolute path, when a file belongs to the workbook.</p>
+
+<h3>A script that drives the workbook it came from: <code>Com.Host()</code></h3>
+<p>The engine cannot reach the Excel instance that hosts it through COM's own cache, and both halves are measured from inside Excel: <code>Com.GetObject("Excel.Application")</code> refuses (the running-object table holds no entry for the instance that loaded the DLL), and <code>Com.CreateObject</code> answers a DIFFERENT instance (a different window handle, <code>1249132</code> against the host's <code>4000928</code>). So the module hands THIS application over and a script reaches it with <code>Com.Host()</code>:</p>
+<pre><code>EngineRunAsync "return Com.Run(fun(scope) { " &amp; _
+    "var app = Com.Host(); " &amp; _
+    "app.ActiveWorkbook.Sheets(""Sheet1"").Range(""A1"").Value = 42; " &amp; _
+    "return app.Name; });"
+Debug.Print EngineWait(10000)        ' pumps Excel, then answers the verdict
+Debug.Print EngineResult             ' "Microsoft Excel"
+Debug.Print EngineOk                 ' True</code></pre>
+<p>Three things about that shape, each measured rather than assumed. <strong>It must be asynchronous</strong>: Excel's <code>Application</code> belongs to this thread's apartment, and an STA cannot answer a COM call while it is inside one, so a synchronous <code>EngineRun</code> stalls until the run it belongs to is over; under <code>EngineRunAsync</code> this thread goes back to its message loop (<code>EngineWait</code> pumps with <code>DoEvents</code>) and the script's calls arrive. <strong><code>Com.Host()</code> answers <code>null</code> when nothing was adopted</strong>, so a flow can decide without a <code>try</code>, and <code>Com.Host(true)</code> is the strict spelling that names the reason instead. <strong>The adoption belongs to the session</strong>: the module adopts when it creates the session, <code>EngineAdoptHost</code> adopts again or adopts something else (a <code>Word.Application</code>, for instance), and <code>StdCallDemo</code> adopts in <code>Class_Initialize</code>, so a class created after <code>EngineRelease</code> still answers with this application.</p>
+<p><strong>And the engine holds that reference only while a run uses it</strong>, which a reader will care about the first time they quit Excel. A COM reference kept between runs stops Excel's own quit from completing: measured, a workbook that adopted the application and then quit left an invisible <code>EXCEL.EXE</code> behind for 25 seconds and still counting, with no window, until something released it; the same workbook after <code>EngineRelease</code> left in half a second, exactly as a session that never adopted does. So the registration lives for the duration of a run (<code>BeginHostUse</code>/<code>EndHostUse</code> in <code>EmbedSession</code>) and an idle engine keeps nothing. A script that stores a <code>Com.Host()</code> value in a global still keeps the application alive through that value, which is ordinary COM semantics rather than a leak: drop the value (or end the session) and it goes. <code>tools\vba-check.ps1</code> pins the behaviour in a child process, which is the only honest subject: a client that adopted the application, did its work and died must leave EXCEL nothing to wait for, and the same check against the engine from before this fix reports the leftover process.</p>
+
+<h3>The three rules the module exists to keep</h3>
+<table>
+<tr><th>Rule</th><th>Why</th></tr>
+<tr><td>Text crosses as UTF-8, and VBA text is UTF-16.</td><td>A <code>ByVal ... As String</code> parameter is converted to the system ANSI code page at the boundary, so an accented identifier or string arrives mangled. The module hands over a <code>Byte()</code> of UTF-8 and converts the answer back with <code>MultiByteToWideChar</code>, in one place.</td></tr>
+<tr><td>A script ANSWERS with <code>return</code>, not with <code>print</code>.</td><td>The engine's output callback runs on the session's own thread, which is not VBA's: inside Excel the session reports <code>"Thread":"own","Apartment":"STA","StackMB":32</code> while VBA runs on its own thread, and a VBA procedure must never be entered from another thread. So the module installs no callback. <code>EngineRun</code> answers the verdict, <code>EngineEval</code> answers the value.</td></tr>
+<tr><td>A live worksheet formula is for stateless reads only.</td><td>Excel calls a user-defined function on its calculation thread, and a session belongs to the thread that created it, so <code>=EngineVersion()</code> is safe while anything that starts a session belongs in a macro.</td></tr>
+</table>
+
+<h3>The whole surface, in one block</h3>
+<pre><code>' one expression, answered as text
+Debug.Print EngineEval("2 + 2")                        ' 4
+
+' declare once, call many times: the session survives between calls
+EngineRun "int twice(int n) { return n * 2; }"
+Debug.Print EngineCall("twice", "[21]")                ' 42
+
+' a whole script, and its verdict as an object
+Dim r As ScriptResult
+Set r = New ScriptResult
+r.LoadFromJson EngineRun("exitcode = 3; return 7;")
+Debug.Print r.Summary                                  ' FAILED  Status=3  Result=7
+
+' the class front, which releases the session when the object goes
+Dim engine As StdCallDemo, outcome As ScriptResult
+Set engine = New StdCallDemo
+engine.Define "int twice(int n) { return n * 2; }"
+Debug.Print engine.CallFunction("twice", "[21]")       ' 42
+Set outcome = engine.LastResult
+If Not outcome.Ok Then MsgBox outcome.Summary
+Set engine = Nothing</code></pre>
+<p>A refusal is never raised as a VBA error: it arrives as <code>Code</code>, <code>Message</code>, <code>Line</code> and <code>Column</code>, which is what a macro reports to a user. And <code>exitcode</code> IS the run's verdict in this language, so a script that sets it is not <code>Ok</code> even when it also returns a value.</p>
+
+<h3>Checking it</h3>
+<pre><code>powershell -NoProfile -ExecutionPolicy Bypass -File tools\vba-check.ps1         # assert, in real Excel
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\vba-check.ps1 -Build  # also rewrite the example workbook</code></pre>
+<p>The check imports the three files into a throwaway workbook, runs the module's self-test and both class probes, prints one line per assertion, and exits 0 when every line says <code>ok:</code>, 1 on a failure, and 2 when it cannot run at all (no engine DLL, or no Excel). <code>assets/language/repl/vba_layer_test.slc</code> runs it through the engine's own gate. Two Windows settings the check needs and a user does not: <code>Trust access to the VBA project object model</code>, which lets it import the modules, and macros enabled, which the example needs.</p>
+<div class="note"><strong>A module file is CRLF.</strong> The VBA editor's importer rejects a class module whose lines end in a bare LF, and it reports that only as "the macro cannot be run", with no line number. The files in <code>assets\language\stdcall\</code> are CRLF for that reason, and an editor that rewrites line endings will break them silently.</div>
 
 <h2 id="limits">Limits, stated plainly</h2>
 <h3>There is no unloading</h3>

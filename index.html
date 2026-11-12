@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ScriptLangCore: a .NET scripting engine for Windows</title>
-<meta name="description" content="ScriptLangCore is a C#-flavoured scripting language for Windows, shipped as a NativeAOT executable, an embeddable DLL with a C ABI and a SQLite extension, and a 15 KB launcher.">
+<meta name="description" content="ScriptLangCore is a C#-flavoured scripting language for Windows, shipped as a NativeAOT executable, an embeddable NativeAOT DLL with a C ABI and a SQLite extension, and a 15 KB launcher, written by Gérôme Guillemin.">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -28,9 +28,51 @@
     margin: 0 auto;
     padding: 40px 24px 80px;
   }
-  header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 8px; }
-  h1 { font-size: 2.1rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
-  h1 small { display: block; font-size: 1rem; font-weight: 400; color: var(--text-dim); letter-spacing: 0; margin-top: 6px; }
+  header.hero {
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 0 26px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  /* A soft light behind the wordmark, so the first screen has a focal point without an image. */
+  header.hero::after {
+    content: "";
+    position: absolute;
+    top: -110px;
+    left: -12%;
+    width: 74%;
+    height: 250px;
+    background: radial-gradient(ellipse at center, rgba(88, 166, 255, 0.16), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  header.hero > * { position: relative; z-index: 1; }
+  .eyebrow {
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  h1.wordmark {
+    font-size: 2.7rem;
+    font-weight: 600;
+    letter-spacing: -0.035em;
+    line-height: 1.1;
+    margin: 0;
+  }
+  h1.wordmark .mark { color: var(--accent); }
+  .tagline {
+    font-size: 1.12rem;
+    line-height: 1.5;
+    color: var(--text);
+    max-width: 46ch;
+    margin: 12px 0 0;
+  }
+  .byline { font-size: 0.9rem; color: var(--text-dim); margin: 14px 0 0; }
+  .byline b { color: var(--text); font-weight: 600; }
   h2 { font-size: 1.35rem; font-weight: 600; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
   h3 { font-size: 1.05rem; font-weight: 600; margin: 0 0 6px; }
   p { margin-bottom: 14px; color: var(--text-dim); }
@@ -130,7 +172,7 @@
     padding: 10px 18px;
   }
   a.donate-btn:hover { background: #005ea6; text-decoration: none; }
-  .donate-note { font-size: 0.85rem; margin: 0; }
+  .donate-note { flex: 1 1 30ch; min-width: 0; font-size: 0.85rem; margin: 0; }
   footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 0.88rem; color: var(--text-dim); }
   footer p { font-size: 0.88rem; margin-bottom: 6px; }
   footer .author { color: var(--text); font-weight: 600; }
@@ -138,10 +180,11 @@
 </head>
 <body>
 
-<header>
-  <h1>ScriptLangCore
-    <small>A C#-flavoured scripting engine for Windows, compiled ahead of time into one self-contained executable.</small>
-  </h1>
+<header class="hero">
+  <p class="eyebrow">A scripting engine for Windows</p>
+  <h1 class="wordmark">ScriptLang<span class="mark">Core</span></h1>
+  <p class="tagline">C#-flavoured scripts, compiled ahead of time into <strong>one self-contained executable</strong>.</p>
+  <p class="byline">Written by <b>Gérôme Guillemin</b>.</p>
   <div class="pills">
     <span class="pill">Windows 7/8/10/11 <b>x64</b></span>
     <span class="pill">NativeAOT, <b>no .NET to install</b></span>
@@ -165,6 +208,24 @@
 <h2 id="what">What it is</h2>
 <p><strong>ScriptLangCore</strong> runs <code>.slc</code> scripts, a C#-flavoured language with classes, interfaces, generics, structs, tuples, pattern matching, lambdas, coroutines, <code>async</code>/<code>await</code>, exceptions and a full Windows UI toolkit. A script is a text file; the engine lexes it, parses it into an AST, and runs it on one of two engines: a bytecode virtual machine for the bodies it can compile, and a tree walker for every shape it cannot, so a script never depends on what the compiler accepted.</p>
 <p>The runtime is NativeAOT: the .NET runtime is inside the executable, so a machine needs Windows and nothing else, with no .NET installation, no Visual C++ redistributable and no Universal CRT redistributable. The engine itself is written in C# and reaches Windows through flat P/Invoke calls rather than through a framework on top.</p>
+
+<!--
+  SUPPORT AND DONATIONS (2026-11-04). The PayPal Donate SDK (developer.paypal.com/sdk/donate) is NOT used here, and this
+  comment says why so nobody re-adds it blindly: that SDK needs either a hosted_button_id (a business account) or an
+  account enabled for the Donate product, and PayPal answers "Cette organisation ne peut pas accepter de dons pour
+  l'instant" for gerome_71@yahoo.fr (its own donation page carries that refusal in the HTML it serves). A PayPal.Me
+  profile has no such requirement, so the button is a plain link to it, with no script and nothing to load from
+  paypal.com. If the account is ever enabled for donations, upgrading to a Business account and creating a button at
+  paypal.com/donate/buttons would allow the SDK variant instead (a hosted_button_id, an optional slot div and
+  donate-sdk.js); until then, this link is the one that works.
+-->
+<h2 id="support">Support the project</h2>
+<p>ScriptLangCore is written and maintained by one person. If it saves you time, a donation keeps the work going.</p>
+<div class="donate">
+  <a class="donate-btn" href="https://www.paypal.me/gerome71"
+     target="_blank" rel="noopener noreferrer">Donate with PayPal</a>
+  <p class="donate-note">Opens my PayPal.Me page (<code>@gerome71</code>), where the amount is yours to choose. A PayPal account is not required: a card works too.</p>
+</div>
 
 <h2 id="shapes">Seven shapes, one engine</h2>
 <div class="shapes">
@@ -231,24 +292,6 @@
   <li><a href="docs/README.md">docs/README.md</a>: the index of the documentation, with the testing pipeline, the registries and the invariants the tree holds itself to.</li>
   <li><a href="docs/architecture.md">docs/architecture.md</a>: how the lexer, the parser, the interpreter and the bytecode VM fit together.</li>
 </ul>
-
-<!--
-  SUPPORT AND DONATIONS (2026-11-04). The PayPal Donate SDK (developer.paypal.com/sdk/donate) is NOT used here, and this
-  comment says why so nobody re-adds it blindly: that SDK needs either a hosted_button_id (a business account) or an
-  account enabled for the Donate product, and PayPal answers "Cette organisation ne peut pas accepter de dons pour
-  l'instant" for gerome_71@yahoo.fr (its own donation page carries that refusal in the HTML it serves). A PayPal.Me
-  profile has no such requirement, so the button is a plain link to it, with no script and nothing to load from
-  paypal.com. If the account is ever enabled for donations, upgrading to a Business account and creating a button at
-  paypal.com/donate/buttons would allow the SDK variant instead (a hosted_button_id, an optional slot div and
-  donate-sdk.js); until then, this link is the one that works.
--->
-<h2 id="support">Support the project</h2>
-<p>ScriptLangCore is written and maintained by one person. If it saves you time, a donation keeps the work going.</p>
-<div class="donate">
-  <a class="donate-btn" href="https://www.paypal.me/gerome71"
-     target="_blank" rel="noopener noreferrer">Donate with PayPal</a>
-  <p class="donate-note">Opens my PayPal.Me page (<code>@gerome71</code>), where the amount is yours to choose. A PayPal account is not required: a card works too.</p>
-</div>
 
 <h2 id="why">Why it is built this way</h2>
 <p><strong>One engine, not two.</strong> Bodies the compiler can model run on the bytecode VM; the rest run on the tree walker, and the two are kept at parity by tests that run the same script through both and compare the answers.</p>

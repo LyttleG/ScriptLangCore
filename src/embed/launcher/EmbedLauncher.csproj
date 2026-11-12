@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE LAUNCHER'S C# ORIGINAL: a small AOT exe that holds NO engine code and drives the published DLL through its C
+       ABI. It is KEPT AS THE REFERENCE, and it is no longer what ships: `src\embed\launcher-c\` is the same program in C,
+       built by GCC into one ~60 KB console exe, because the NativeAOT runtime behind this one cost 1.2 MB for a DLL load,
+       ten export lookups, one resource read and two string builders. The port is behaviour-identical, message for message
+       (that is what `src/build/embed-check.sh` pins), so this file is the specification a reader compares against.
+       It references nothing from this repository, which is the whole point: the engine arrives as
+       `publish-launcher\ScriptLangCore.dll` beside the exe, so this project compiles on its own with no engine source
+       at all. It lives under `src\embed\` because it is one of this repository's projects rather than a tool script.
+
+       WHY ITS OWN CONFIGURATION: `dotnet publish -c Launcher` is what a maintainer types, and it turns on exactly what a
+       shipping launcher needs (AOT, size) with its own obj\Launcher\ and bin\Launcher\ by construction, so the three AOT
+       legs (exe, shared library, launcher) can never be handed each other's intermediate output. Same rule the engine's
+       `Embed` configuration follows. -->
+  <PropertyGroup>
+    <OutputType Condition="'$(Configuration)' == 'Launcher'">Exe</OutputType>
+    <OutputType Condition="'$(Configuration)' == 'Debug'">Exe</OutputType>
+    <OutputType Condition="'$(Configuration)' == 'Release'">Exe</OutputType>
+    <SlcLauncherProfile Condition="'$(Configuration)' == 'Launcher'">true</SlcLauncherProfile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ScriptLangCore.Launcher</AssemblyName>
+    <!-- THE SAME ICON the engine's exe carries, so a packaged app and the CLI it stands in for look alike. A script that
+         shows a form gets its default icon from `Environment.ProcessPath`, which in a host IS this exe, so the icon here
+         is also what a script's window shows by default. -->
+    <ApplicationIcon>..\..\..\forward.ico</ApplicationIcon>
+    <!-- THE ENGINE'S OWN MANIFEST, and it is not cosmetic: it carries the Common-Controls v6 assembly dependency and
+         PerMonitorV2 awareness, which the engine's exe has always had (ScriptLangCore.csproj sets the same file). A host
+         without it registers NO v6 classes, so measured through the launcher the corpus' UI suites failed with
+         `[CreateWinControl]: CreateWindowEx for 'SysLink' failed: 1407` (ERROR_CLASS_NOT_FOUND), a themed control's paint
+         notification never arrived, and `ListView.DeleteColumn` behaved like the legacy control. A payload runs as THIS
+         process, so the manifest has to be this process's. -->
+    <ApplicationManifest>..\..\..\app.manifest</ApplicationManifest>
+    <RootNamespace>ScriptLangCoreLauncher</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(SlcLauncherProfile)' == 'true'">
+    <PublishAot>true</PublishAot>
+    <!-- A new configuration has to SAY Optimize: the SDK leaves it false for a name it does not know, and the ILC targets
+         derive both the codegen mode and method-body folding from it (the engine's Embed leg lost 18 MB to this). -->
+    <Optimize>true</Optimize>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DebugType>none</DebugType>
+    <StripSymbols>true</StripSymbols>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
+    <!-- NO STACK TRACES IN THE LAUNCHER, measured at 137,728 B of its 1,311,232 (-10.5%). The launcher catches nothing, so
+         the one trace it could print is the runtime's own for an unhandled crash, where the exception's type and message
+         are what a reader needs and the frames are the runtime's rather than ours. The ENGINE keeps StackTraceSupport ON
+         on purpose (its error reports carry Frames, pinned by error_frames) and is a separate assembly, so this does not
+         reach it.
+         AND `IlcDisableReflection` IS DELIBERATELY ABSENT: adding it produced a BYTE-IDENTICAL image (measured), which
+         means there is no reflection metadata here to remove, and a knob that changes nothing is a claim that it does
+         something. -->
+    <StackTraceSupport>false</StackTraceSupport>
+    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- THE PAYLOAD SLOT, in every configuration: `SLCPAYLOAD` as RT_RCDATA, shipped EMPTY (payload.bin is 0 bytes) and
+       filled per packaged exe by `tools/slc-pack.slc`. `payload.res` is the COMPILED form and is checked in on purpose:
+       the build then needs no Windows SDK, exactly like the other checked-in binary fixtures here (the bytecode
+       verifier's `_verify_bad_*.bin`), and it is regenerated by one command, stated in payload.rc:
+           rc /nologo /fo payload.res payload.rc        (rc.exe lives in the Windows SDK's bin\<ver>\x64)
+       Not done in an MSBuild target because locating rc.exe reliably from MSBuild cost more than the step is worth. -->
+  <!-- MEASURED, and it is why nothing is wired here: `<Win32Resource>` is IGNORED by the NativeAOT publish. The .res file
+       compiled into the IL assembly never reaches the native image, so an EXE built that way answers "no such resource"
+       (probed by loading the published launcher as a datafile and calling FindResourceW). The slot therefore does not
+       need to exist at build time at all: `UpdateResource` CREATES an entry, so `tools/slc-pack.slc` adds it to a copy,
+       and the launcher treats an absent entry and an empty one the same way ("not packaged"). payload.rc is kept as the
+       one statement of the slot's type and name, which is what the packer and the reader must agree on. -->
+
+</Project>

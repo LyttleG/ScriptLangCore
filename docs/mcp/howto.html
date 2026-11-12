@@ -198,7 +198,7 @@ its top-level <code>RegisterMcpTool()</code> calls register exactly as a script'
 <h4>Minimal example</h4>
 <pre><code><span class="tag tag-api">tools/hello.slc</span>
 RegisterMcpTool("hello", "Greet a person by name.",
-    fun(string name) {
+    (string name) => {
         return "Hello, " + name + "!";
     },
     '{ "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }'
@@ -229,7 +229,7 @@ merely a library, which is what makes a tools directory of compiled bundles work
 </table>
 
 <h4>Handler function signature</h4>
-<pre><code>fun(string path, string content) {
+<pre><code>(string path, string content) => {
     // Return a string, it becomes the MCP response content.
     return "result";
 }</code></pre>
@@ -699,7 +699,7 @@ mcp.stdout.on("data", (data) => {
 <p><strong>Handler is zero-argument</strong>, no parameters, returns the resource content as a string:</p>
 <pre><code>// Inline lambda
 RegisterMcpResource("info/system", "System Info", "text/plain",
-    fun() { return "OS: " + Environment.OSVersion; }
+    () => { return "OS: " + Environment.OSVersion; }
 );
 
 // Named function also works
@@ -750,7 +750,7 @@ curl -X POST http://localhost:8765/ -H "Content-Type: application/json" -d '{"js
 <pre><code><span class="tag tag-api">tools/file_tools.slc</span>
 // ── Read a file ──
 RegisterMcpTool("read_file", "Read the full contents of a text file.",
-    fun(string path) {
+    (string path) => {
         if (!File.Exists(path))
             return "Error: file not found: " + path;
         return File.ReadAllText(path);
@@ -760,7 +760,7 @@ RegisterMcpTool("read_file", "Read the full contents of a text file.",
 
 // ── Write a file ──
 RegisterMcpTool("write_file", "Write text content to a file (creates or overwrites).",
-    fun(string path, string content) {
+    (string path, string content) => {
         File.WriteAllText(path, content);
         return "Written: " + path + " (" + content.Length + " chars)";
     },
@@ -769,7 +769,7 @@ RegisterMcpTool("write_file", "Write text content to a file (creates or overwrit
 
 // ── List directory ──
 RegisterMcpTool("list_dir", "List all files in a directory.",
-    fun(string dir) {
+    (string dir) => {
         if (!Directory.Exists(dir))
             return "Error: directory not found: " + dir;
         var files = Directory.GetFiles(dir);
@@ -786,7 +786,7 @@ RegisterMcpTool("list_dir", "List all files in a directory.",
 
 // ── File size ──
 RegisterMcpTool("file_size", "Get the size of a file in bytes.",
-    fun(string path) {
+    (string path) => {
         if (!File.Exists(path))
             return "Error: file not found: " + path;
         var size = File.GetSize(path);
@@ -797,7 +797,7 @@ RegisterMcpTool("file_size", "Get the size of a file in bytes.",
 
 // ── System info ──
 RegisterMcpTool("system_info", "Return OS and process information.",
-    fun() {
+    () => {
         var os  = Environment.OSVersion;
         var proc = Environment.ProcessorCount;
         var mem = GC.GetTotalMemory();

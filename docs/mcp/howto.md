@@ -79,7 +79,7 @@ Each tool is a JavaScript function registered via `RegisterMcpTool()`. Place you
 ```javascript
 // tools/hello.slc
 RegisterMcpTool("hello", "Greet a person by name.",
-    fun(String name) {
+    (String name) => {
         return "Hello, " + name + "!";
     },
     '{ "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }'
@@ -110,7 +110,7 @@ RegisterMcpTool(name, description, handler, [schema])
 ### Handler function signature
 
 ```javascript
-fun(String path, String content) {
+(String path, String content) => {
     // The function receives arguments matching the JSON-RPC
     // "arguments" object keys. Return a string, it becomes
     // the MCP response content.
@@ -696,7 +696,7 @@ RegisterMcpResource(uri, name, mimeType, handler)
 ```javascript
 // Inline lambda
 RegisterMcpResource("info/system", "System Info", "text/plain",
-    fun() { return "OS: " + Environment.OSVersion; }
+    () => { return "OS: " + Environment.OSVersion; }
 );
 
 // Named function also works
@@ -760,7 +760,7 @@ Here's a complete MCP tool script that exposes file operations to the AI:
 
 // ── Read a file ──
 RegisterMcpTool("read_file", "Read the full contents of a text file from disk.",
-    fun(String path) {
+    (String path) => {
         if (!File.Exists(path))
             return "Error: file not found: " + path;
         return File.ReadAllText(path);
@@ -770,7 +770,7 @@ RegisterMcpTool("read_file", "Read the full contents of a text file from disk.",
 
 // ── Write a file ──
 RegisterMcpTool("write_file", "Write text content to a file (creates or overwrites).",
-    fun(String path, String content) {
+    (String path, String content) => {
         File.WriteAllText(path, content);
         return "Written: " + path + " (" + content.Length + " chars)";
     },
@@ -779,7 +779,7 @@ RegisterMcpTool("write_file", "Write text content to a file (creates or overwrit
 
 // ── List directory contents ──
 RegisterMcpTool("list_dir", "List all files in a directory.",
-    fun(String dir) {
+    (String dir) => {
         if (!Directory.Exists(dir))
             return "Error: directory not found: " + dir;
         var files = Directory.GetFiles(dir);
@@ -796,7 +796,7 @@ RegisterMcpTool("list_dir", "List all files in a directory.",
 
 // ── Get file size ──
 RegisterMcpTool("file_size", "Get the size of a file in bytes.",
-    fun(String path) {
+    (String path) => {
         if (!File.Exists(path))
             return "Error: file not found: " + path;
         var size = File.GetSize(path);
@@ -807,7 +807,7 @@ RegisterMcpTool("file_size", "Get the size of a file in bytes.",
 
 // ── Win32 system info (WinApi demo) ──
 RegisterMcpTool("system_info", "Return OS and process information.",
-    fun() {
+    () => {
         var os = Environment.OSVersion;
         var proc = Environment.ProcessorCount;
         var mem = GC.GetTotalMemory();

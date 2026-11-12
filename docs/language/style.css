@@ -534,3 +534,89 @@ table.cmp-table td { vertical-align: top; overflow-wrap: break-word; }
 table.cmp-table col.cmp-feature { width: 24%; }
 table.cmp-table col.cmp-csharp { width: 15%; }
 table.cmp-table col.cmp-slc { width: 61%; }
+
+/* ── Printing / Save as PDF: the WHOLE reference, not the state on screen ─────
+   A reader printing this page wants every entry and every sub-item, so these rules ignore the three things that
+   hide content while reading: a collapsed category, a closed entry, and a search or namespace filter. Ctrl+P is
+   therefore complete on its own, and the header's Print / PDF button (script.js) only makes the SCREEN say the
+   same thing before it opens the dialog.
+   The dark palette is a screen choice, so a printout flips to black on white, and a code block WRAPS: a sheet of
+   paper has no scrollbar, so `white-space: pre` with `overflow-x: auto` would clip every long line. */
+@media print {
+  @page { margin: 12mm; }
+
+  html, body { background: #fff !important; color: #111 !important; }
+  body { font-size: 10.5pt; line-height: 1.45; }
+
+  /* The title stays as the document's own heading; every control goes. */
+  header {
+    position: static;
+    display: block;
+    padding: 0 0 10px;
+    margin: 0 0 18px;
+    background: #fff;
+    border-bottom: 2px solid #111;
+  }
+  header h1 { color: #111; font-size: 16pt; }
+  header h1 small { color: #444; }
+  .search-box, .search-stats, .header-btn, .sidebar, .no-results,
+  .code-block .copy-btn, .entry-body .note .copy-btn { display: none !important; }
+  .layout, .main { display: block; padding: 0; }
+
+  /* EVERYTHING OPEN: the screen sheet's three hiding rules, neutralised. */
+  .category { margin-bottom: 20px; }
+  .category.collapsed .entry-list { display: flex !important; }
+  .category.hidden, .entry.hidden { display: block !important; }
+  .entry .entry-body { display: block !important; }
+
+  /* A card is a border plus a hover fill on screen; a printout keeps the border and drops the rest. */
+  .entry { background: #fff; border: 1px solid #bbb; border-radius: 0; padding: 8px 10px; }
+  .entry-header { break-after: avoid; page-break-after: avoid; }
+  .entry-name { color: #0b3d75; }
+  .entry-desc, .entry-body p, .entry-body li { color: #111; }
+  .entry-tag { background: transparent !important; border: 1px solid #999; color: #111 !important; }
+
+  h2, h3, h4 { color: #111; break-after: avoid; page-break-after: avoid; }
+  .category h2 { border-bottom: 1px solid #999; }
+
+  /* Code: readable, WRAPPED, and never sliced by a page boundary. */
+  .entry-body .syntax, .entry-body .example {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-left: 3px solid #57606a;
+    color: #111;
+    white-space: pre-wrap;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    font-size: 8.5pt;
+    break-inside: avoid;
+  }
+  .code-block { break-inside: avoid; }
+  .entry-body .note { background: #fdf6e3; color: #111; break-inside: avoid; }
+
+  /* The syntax palette is chosen for a dark background and reads as a pale wash on white, so it is darkened
+     here rather than dropped, which keeps a keyword distinguishable from a string. */
+  .kw { color: #7b2f9e; }
+  .fn { color: #0b4a8f; }
+  .str { color: #1f6b2a; }
+  .num { color: #9a3d10; }
+  .cmt { color: #5a6672; }
+  .typ { color: #7a5200; }
+  .op { color: #8a4b00; }
+  code { color: #0b4a8f; white-space: normal; overflow-wrap: anywhere; }
+  .note code { color: #8a4b00; }
+  mark.hit { background: #ffe9a8; color: #111; }
+
+  /* Tables: the header row repeats on every page and a row is never split. */
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  table th { color: #111; border-bottom: 1px solid #666; }
+  table td, table th { border-color: #bbb; }
+  table tr:nth-child(even) td { background: #f6f8fa; }
+  table tr:hover td { background: transparent; }
+
+  a { color: #0b4a8f; text-decoration: none; }
+  .verdict-ok { color: #1a7f37; }
+  .verdict-no { color: #b3231b; }
+  .verdict-warn { color: #8a6100; }
+}

@@ -494,6 +494,63 @@
     });
   });
 
+  // ── Print the whole reference / save it as a PDF ───────
+  // The print stylesheet (style.css, `@media print`) already forces every category and every entry open, so Ctrl+P
+  // is complete on its own. This button makes the SCREEN say the same thing, so what is seen is what is printed, and
+  // then opens the browser's own dialog, where "Save as PDF" is the export. A PDF writer is deliberately NOT here:
+  // a library would break this page's no-dependency rule, and hand-rolling one over 1.5 MB of HTML would be a second
+  // renderer that could disagree with the browser's own.
+  document.getElementById('printAll')?.addEventListener('click', () => {
+    // The reader's own view, put back when the dialog closes. A search hides entries and a namespace click hides the
+    // rest, and both are reading aids rather than part of the reference. `snapshot` is the state a search restored
+    // from and it is captured BEFORE the box is cleared below, because clearing it is what consumes that snapshot.
+    const before = {
+      query: searchInput.value,
+      open: new Set(document.querySelectorAll('.entry.open')),
+      collapsed: new Set(document.querySelectorAll('.category.collapsed')),
+      snapshot: state.searchSnapshot,
+    };
+
+    // Everything visible, everything expanded. The empty query goes through doSearch so nothing stays hidden and no
+    // search snapshot is left armed.
+    searchInput.value = '';
+    doSearch();
+    document.querySelectorAll('.category').forEach(cat => {
+      cat.classList.remove('collapsed', 'hidden');
+      const toggle = cat.querySelector('.toggle');
+      if (toggle) toggle.classList.remove('collapsed');
+    });
+    entries.forEach(entry => {
+      entry.classList.remove('hidden');
+      entry.classList.add('open');
+    });
+    noResults.classList.remove('visible');
+    searchStats.textContent = `${entries.length} entries, all expanded for printing`;
+    window.scrollTo(0, 0);
+
+    // Write the state back rather than toggling it, so restoring twice (the call after print, and `afterprint` when
+    // the dialog closes) cannot drift. In a browser whose print() returns before the dialog closes, this runs early
+    // and that is harmless: the printout is complete whatever the screen currently carries, because the stylesheet is
+    // what opens the entries for paper.
+    const restore = () => {
+      searchInput.value = before.query;
+      doSearch();
+      // doSearch takes a fresh snapshot of the ALL-OPEN state the button just built, so it is put back by hand:
+      // otherwise clearing the box later would restore 328 open entries instead of the reader's own view.
+      state.searchSnapshot = before.snapshot;
+      entries.forEach(entry => entry.classList.toggle('open', before.open.has(entry)));
+      document.querySelectorAll('.category').forEach(cat => {
+        const wasCollapsed = before.collapsed.has(cat);
+        cat.classList.toggle('collapsed', wasCollapsed);
+        const toggle = cat.querySelector('.toggle');
+        if (toggle) toggle.classList.toggle('collapsed', wasCollapsed);
+      });
+    };
+    window.addEventListener('afterprint', restore, { once: true });
+    window.print();
+    restore();
+  });
+
   // ── Init ───────────────────────────────────────────────
   searchInput.addEventListener('input', doSearch);
   addCopyButtons();

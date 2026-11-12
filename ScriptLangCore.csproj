@@ -1,0 +1,258 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <TrimmerRootDescriptor Include="rd.xml" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType Condition="'$(Configuration)' == 'Release'">Exe</OutputType>
+    <OutputType Condition="'$(Configuration)' == 'Debug'">Exe</OutputType>
+    <!-- THE EMBEDDING LEG IS A CONFIGURATION, not a set of -p: overrides, because a configuration gives it its own
+         obj\Embed\ and bin\Embed\ BY CONSTRUCTION (both paths include $(Configuration)). Two publishes that differ
+         only in global properties would otherwise share one intermediate directory, and an up-to-date check would
+         then be free to hand one leg the other leg's managed assembly (a library assembly carries no entry point).
+         So `dotnet publish -c Embed` is the embedding artifact, and `dotnet publish -c Release` is the exe. -->
+    <OutputType Condition="'$(Configuration)' == 'Embed'">Library</OutputType>
+
+    <!-- The two AOT configurations share one profile so the optimization knobs below are stated once: Release ships
+         the EXE, Embed ships the SHARED LIBRARY a native host loads. Debug stays the JIT leg (and cannot export the
+         C ABI at all, see compile_jit.bat).
+
+         Optimize IS STATED HERE, explicitly, because the SDK leaves it FALSE for any configuration it does not know
+         (it is only implied by the built-in Debug/Release names). The ILCompiler targets derive TWO things from it:
+         the code-generation mode, and method-body folding. Without this line the embedding library built from the
+         same sources came out at 37,090,304 B against the exe's 19,581,440 B, with the ILC line carrying the folding
+         switch set to none, because this engine is full of structurally identical registration lambdas and folding is
+         what merges them. One line, and both AOT artifacts get the same treatment. -->
+    <SlcAotProfile Condition="'$(Configuration)' == 'Release'">true</SlcAotProfile>
+    <SlcAotProfile Condition="'$(Configuration)' == 'Embed'">true</SlcAotProfile>
+    <Optimize Condition="'$(SlcAotProfile)' == 'true'">true</Optimize>
+
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TargetFramework>net11.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+
+    <PublishAot Condition="'$(SlcAotProfile)' == 'true'">true</PublishAot>
+    <InteropsNeedNativeAot>true</InteropsNeedNativeAot>
+    <IlcDisableReflection>false</IlcDisableReflection>
+
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>forward.ico</ApplicationIcon>
+
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <StackSize>33554432</StackSize>
+    <!-- NativeAOT: the AOT linker reads IlcDefaultStackSize for /STACK (default 1.5MB);
+         the 8MB-cap regression: <StackSize> alone is ignored by AOT. 32MB gives
+         ~23k frames physical, so guard=5000 survives its own throw-unwind. -->
+    <IlcDefaultStackSize>33554432</IlcDefaultStackSize>
+
+    <!-- ========== WARNING MAXIMISATION SETTINGS ========== -->
+    <!-- Enable all compiler warnings (level 4 is the highest) -->
+    <WarningLevel>4</WarningLevel>
+
+    <!-- ONE analysis story, and it is a CURATED one. `AnalysisLevel none` used to sit beside an
+         `AnalysisMode latest-All`, which is inert while the level is none: the section promised the most
+         comprehensive analysis and delivered none. Measured on .NET 11 RC3 with the recommended set on
+         (`latest-recommended`), a clean build reports 242 DISTINCT diagnostics (each logged twice, because the
+         analyzers run for the assembly and for the reference assembly), and they are overwhelmingly style
+         families: CA1822 "make it static" 68, CA1859 "use concrete types" 41, CA2201 "do not raise general
+         exception types" 39 (this engine raises ScriptException on purpose everywhere it refuses), CA1866/CA1865
+         char-overload micro-optimisations 18, CA1852 "seal it" 13, CA1720 identifier-naming 12, CA1805
+         redundant-default 5, CA2020 IntPtr arithmetic 4, plus a tail of single digits. Turning all of that on
+         would be a rewrite of the refusal model, not a lint pass, so the RULES THAT FIND DEFECTS are kept and
+         the rest is suppressed by name:
+
+           kept     CA1806 ignored native result, CA2208 argument-exception shape, CA2244 duplicated element
+                    initializer, CA1868 redundant Contains before Remove, CA1069 duplicated enum value,
+                    CA1305/CA1310 culture-sensitive formatting and comparison, CA5350 weak crypto
+           dropped  the families listed in NoWarn below, each for the reason above
+
+         Each KEPT rule's sites were read: what they found is in the commit that added this block, and the two
+         places where the rule is right in general and wrong here carry a targeted `#pragma` with the reason
+         (the WebSocket handshake's SHA-1 is RFC 6455's, and the sqlite bulk-insert loops already ignore the
+         STEP result, so checking reset alone would report one failure and stay silent about the next). -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <NoWarn>$(NoWarn);CA1001;CA1068;CA1510;CA1711;CA1720;CA1805;CA1816;CA1822;CA1825;CA1834;CA1836;CA1847;CA1852;CA1854;CA1859;CA1860;CA1865;CA1866;CA2020;CA2026;CA2201;CA2249;CA2263</NoWarn>
+
+    <!-- Enforce code style (IDE) warnings as build warnings -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Generate XML documentation file – this produces warnings for missing public member comments -->
+    <!--GenerateDocumentationFile>true</GenerateDocumentationFile-->
+
+    <!-- Disabled: when enabled, AOT LibraryImport source-gen does nint arithmetic in checked context,
+         causing intermittent OverflowException on 64-bit pointer operations. Enable only for dev builds. -->
+    <!--<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>-->
+
+    <!-- Suppress AOT/trim warnings inherent to a dynamic scripting runtime -->
+    <!-- Reflection (Type.GetType, GetMethods, etc.) resolves .NET types at script runtime -->
+    <NoWarn>$(NoWarn);IL3050;IL2026;IL2062;IL2065;IL2075;IL2057;IL2055;IL2070;IL2067</NoWarn>
+    <SignAssembly>False</SignAssembly>
+    <Copyright>(c) Gérôme Guillemin</Copyright>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>forward.ico</PackageIcon>
+
+    <!-- (Optional) Turn warnings into errors – uncomment if you want the build to fail on any warning -->
+    <!-- <TreatWarningsAsErrors>true</TreatWarningsAsErrors> -->
+    <!-- ==================================================== -->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- The RUNTIME async lowering, runtime-async=on, and it is LOAD BEARING now: this assembly declares ONE async
+         method (`EventSubject.AwaitItemAsync`, an `async ValueTask<bool>` on the `await foreach` path), so the
+         switch lowers real code. MEASURED on .NET 11 RC3 with a forced full rebuild (no incremental), the flag on
+         against off, and it is the flag that wins on both artifacts: managed Release assembly 2,207,232 B against
+         2,208,256 B, and the AOT publish 19,717,120 B against 19,718,656 B, with identical behaviour
+         (`events_subject_test` 66, `crash_task` 24, `coroutine_resume_test` 15, `async_stream_test` 32 on both).
+         An earlier note here called it a measured no-op with a byte-identical assembly, which was true when the
+         assembly declared no async method at all and is false today: the switch reaches csc as
+         `features:runtime-async=on` against `=off`, and the two compilations differ. The FRAMEWORK's async methods
+         are lowered this way regardless of this setting, which is why AotHints still roots
+         `Task`/`Task<T>`/`ValueTask<T>.AsTask` for the reflection bridge. -->
+    <Features>runtime-async=on</Features>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="C_code/**" />
+    <!-- The SDK already excludes `obj/**` through DefaultItemExcludes, which is derived from
+         BaseIntermediateOutputPath. That link is broken the moment a caller moves the intermediate directory with
+         `-p:BaseIntermediateOutputPath=...` (which is legal and occasionally useful, and which this project's own
+         earlier DLL leg did before it became a configuration), and then BOTH generated AssemblyInfo.cs files compile
+         and the build answers CS0579 "attribute declared twice". Stating the exclusion absolutely keeps a moved
+         intermediate from ever being picked up as source. -->
+    <Compile Remove="obj/**" />
+    <!-- src/embed/ is the HOST that checks the C ABI, and a host has to be a separate program: without this, its
+         Program.cs joins the engine's compilation as a SECOND entry point (CS0017). It sits under src/ because it is a
+         project of this repository rather than a tool script, so the exclusion has to cover its own obj/ and bin/ as
+         well (the engine's `obj/**` exclusion is stated against the ROOT intermediate directory, not against a nested
+         project's). -->
+    <Compile Remove="src/embed/**" />
+    <!-- A PUBLISHED FOLDER IS OUTPUT, NEVER SOURCE. `publish-aot\` holds a copy of `tools\`, and (from the years when the
+         DLL leg published into it) copies of generated `AssemblyInfo.cs` files, so a default `**/*.cs` glob compiled
+         them: CS0579 "attribute declared twice" and CS0101 "two Program.cs" both came from here, once a `tools\`
+         subfolder held C# at all. Excluding the three artifact folders makes a publish unable to poison the next
+         build, whatever a leg writes there. -->
+    <Compile Remove="publish-aot/**" />
+    <Compile Remove="publish-dll/**" />
+    <Compile Remove="publish-launcher/**" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(SlcAotProfile)' == 'true'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <DebuggerSupport>false</DebuggerSupport>
+    <StripSymbols>true</StripSymbols>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <!-- THE BASELINE X64 INSTRUCTION SET, by decision (dec-eed7d4fa87e12d2a), where this used to say `native`.
+         MEASURED: `base` publishes to 19,553,280 B against `native`'s 19,623,424 (-70,144), so it is slightly SMALLER as
+         well as portable. Portability is the reason: `native` tunes the image to the BUILD machine's ISA, so an exe built
+         on an AVX-512 box can fault on an older CPU, which is a shipping defect nothing in this tree would catch. The
+         measured cost is speed, and the two were never benchmarked against each other; the bench suites are the instrument
+         if that ever matters. The launcher sets no instruction set at all, so it already takes the SDK's baseline. -->
+    <IlcInstructionSet>base</IlcInstructionSet>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <StackTraceSupport>true</StackTraceSupport>
+
+    <TrimMode>full</TrimMode>
+    <EnableReflectionMetadata>true</EnableReflectionMetadata>
+
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <EventSourceSupport>false</EventSourceSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+
+    <!-- GC tuning for bursty script allocation patterns -->
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Embed'">
+    <!-- NativeLib=Shared is what makes the AOT compiler emit a DLL rather than an exe; OutputType=Library above is
+         what lets it. The .lib and .exp an import library needs land beside the native object files, and the exports
+         themselves come from the `[UnmanagedCallersOnly]` entries in src\Host\EmbedApi.cs. NOTHING ELSE CHANGES
+         between the two AOT artifacts, which is the point: the same engine, the same knobs, a different image. -->
+    <NativeLib>Shared</NativeLib>
+    <!-- The COM in-proc server (`src/Host/ComServer.cs`) is compiled into this configuration ONLY. `SLC_EMBED_COM`
+         is what keeps it out of the exe legs: a class factory is meaningless in an exe, and the Debug/Release images
+         must stay exactly what they were (the dump-parity baselines are taken against them). -->
+    <DefineConstants>$(DefineConstants);SLC_EMBED_COM</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="C_code/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Release free virtual memory pages promptly instead of retaining them -->
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
+    <!-- Compact Gen2/LOH to reduce heap fragmentation from many small allocations -->
+    <RuntimeHostConfigurationOption Include="System.GC.CompactAtGC" Value="true" />
+    <!-- Cap the GC heap at 30% of physical memory to avoid overcommitting the host.
+         HeapHardLimitPercent takes a PERCENT; for an absolute byte cap use HeapHardLimit
+         (1073741824 = 1 GB). Both can be set; HeapHardLimit wins. -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="1073741824" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="forward.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.35.0.4138">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!--PackageReference Include="Meziantou.Analyzer" Version="3.0.218">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Roslynator.Analyzers" Version="5.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.analyzers" Version="2.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference-->
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="docs\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Update="forward.ico">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Update="assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <Content Include="tools\**\*" Exclude="tools\**\*.cs;tools\**\obj\**;tools\**\bin\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- WHAT TRAVELS, AND WHAT DELIBERATELY DOES NOT. `tools\` is the DEPLOYED folder: what a script reads at run time
+         (the `mcp_*.slc` scripts, the `sqlite3.dll` native it loads by name, and a readme that says so). The instruments
+         that check this repository (the invariant scripts, the documentation gates, the harness runners and their
+         baselines) live in `src\build\` and are NOT content items, so a publish cannot carry a checker to a user.
+         WHAT IS EXCLUDED AND WHY, because it broke a build: when this repository's C ABI host lived in `tools\embed\`,
+         copying `tools\` into the publish output put its sources AND its generated AssemblyInfo next to the executable,
+         and the next `dotnet build` GLOBBED THEM BACK AS ENGINE SOURCE, answering CS0579 (a duplicate
+         `[assembly: AssemblyConfiguration]`) and then CS0101 (two `Program.cs` files declaring the same delegates). The
+         host has since moved to `src\embed\` (a project, excluded separately), and the exclusion stays because the rule
+         outlives the layout: a deployed `tools\` is a directory of scripts, so only scripts travel. -->
+    <!-- The sqlite native must sit NEXT TO the executable (the engine's deployed-layout rule), for the
+         build output AND the publish output: without this the sqlite suites die with
+         "DllNotFound_Windows, sqlite3" under NativeAOT, while passing under the JIT build only because a
+         copy had been placed by hand. Source is the existing deployment copy; Exists() keeps the build
+         working for anyone who does not have it. -->
+    <None Include="publish-aot\sqlite3.dll" Condition="Exists('publish-aot\sqlite3.dll')">
+      <Link>sqlite3.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

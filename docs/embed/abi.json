@@ -1,0 +1,439 @@
+{
+  "comment": "THE EMBED ABI, WRITTEN DOWN ONCE. Every export and every capability bit is here, and the bindings under bindings/ are GENERATED from this file by tools/gen-abi-bindings.ps1: do not edit them. tools/check-abi-manifest.sh fails when this file, the exports marked [UnmanagedCallersOnly] in src/Host/EmbedApi.cs, the capability bits in src/Host/EmbedCapabilities.cs, or the generated files disagree. `since` IS each entry's minimum ABI: a binding generated from ABI 5 calls an entry only when the library reports at least that revision, and drops the rest.",
+  "abi": 5,
+  "callingConvention": "cdecl",
+  "conventions": {
+    "handle": "int64_t, opaque and never reused (a counter, not a slot): a stale handle answers a refusal naming it instead of reaching a new session. 0 is not a session; it is the calling thread's last slc_create failure, which is what a host reads after slc_create answered 0.",
+    "strings": "UTF-8 and NUL-terminated. An input string belongs to the caller and is read only for the duration of the call. An output goes into a CALLER-OWNED buffer with the snprintf convention: the call answers the length it NEEDS excluding the terminator, writes at most capacity - 1 bytes plus the terminator, and answers the same length for capacity 0, so one probe sizes the buffer. Nothing returned points into engine memory.",
+    "statuses": "The engine's exit codes, so a host reads the numbers the CLI exits with: 0 ok, 1 failed, 2 usage, 3 refused. A run that ended with the script's own exit(n) answers n. A refusal names its reason in slc_last_error.",
+    "threads": "One call at a time per handle: a run is marshalled to the thread that owns the interpreter and the host waits for it, so a second verb arriving meanwhile is refused by name rather than queued. slc_cancel is the exception (a signal from any thread by design). Nothing throws across the boundary."
+  },
+  "exports": [
+    {
+      "name": "slc_version",
+      "returns": "int",
+      "params": [
+        {
+          "type": "char*",
+          "name": "buffer",
+          "dir": "out"
+        },
+        {
+          "type": "int",
+          "name": "capacity"
+        }
+      ],
+      "since": 1,
+      "summary": "the engine version, the runtime and the ABI revision as one sentence, so a host log answers which build answered"
+    },
+    {
+      "name": "slc_abi_revision",
+      "returns": "int",
+      "params": [],
+      "since": 5,
+      "summary": "the ABI revision alone, for a binding that compares a contract instead of parsing a sentence"
+    },
+    {
+      "name": "slc_capabilities",
+      "returns": "int",
+      "params": [],
+      "since": 5,
+      "summary": "the bitmask of what THIS build answers, so a binding drops what an older library lacks instead of failing a lookup"
+    },
+    {
+      "name": "slc_create",
+      "returns": "int64_t",
+      "params": [
+        {
+          "type": "const char*",
+          "name": "optionsJson"
+        }
+      ],
+      "since": 1,
+      "summary": "a session handle, or 0 with the reason in slc_last_error(0, ...)"
+    },
+    {
+      "name": "slc_free",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        }
+      ],
+      "since": 1,
+      "summary": "0 released, 2 an unknown or already freed handle, 3 a run is in flight (the handle stays valid, so freeing can be retried)"
+    },
+    {
+      "name": "slc_thread_mode",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        }
+      ],
+      "since": 1,
+      "summary": "0 the engine's own thread, 1 the host's, -1 an unknown handle: the two modes have different stack budgets"
+    },
+    {
+      "name": "slc_last_error",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "char*",
+          "name": "buffer",
+          "dir": "out"
+        },
+        {
+          "type": "int",
+          "name": "capacity"
+        }
+      ],
+      "since": 1,
+      "summary": "one sentence about the last call on that handle, or empty when it succeeded; handle 0 answers the calling thread's last slc_create failure"
+    },
+    {
+      "name": "slc_last_result",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "char*",
+          "name": "buffer",
+          "dir": "out"
+        },
+        {
+          "type": "int",
+          "name": "capacity"
+        }
+      ],
+      "since": 2,
+      "summary": "the last run's or call's verdict as JSON (Status, Ok, Error, Fatal, Cancelled, Code, Message, Line, Checks, Result), one door for everything a verb answered"
+    },
+    {
+      "name": "slc_stats",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "char*",
+          "name": "buffer",
+          "dir": "out"
+        },
+        {
+          "type": "int",
+          "name": "capacity"
+        }
+      ],
+      "since": 1,
+      "summary": "a JSON snapshot of the session for a host's own log: revision, capability mask, thread mode, apartment, stack budget, globals"
+    },
+    {
+      "name": "slc_set_output",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "void*",
+          "name": "callback"
+        },
+        {
+          "type": "void*",
+          "name": "user"
+        }
+      ],
+      "since": 2,
+      "summary": "0 installed a line callback (channel 0 print, 1 engine log), NULL removes it; with none the output is dropped rather than written to the host's console"
+    },
+    {
+      "name": "slc_run_file",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "path"
+        }
+      ],
+      "since": 2,
+      "summary": "the run's status: runs source text in the session's interpreter, so what it declares stays callable; a compiled bundle is refused by name"
+    },
+    {
+      "name": "slc_run_text",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "source"
+        },
+        {
+          "type": "const char*",
+          "name": "name"
+        }
+      ],
+      "since": 2,
+      "summary": "the run's status for source text; the optional name is what Script.Directory() and ./ mean for a snippet"
+    },
+    {
+      "name": "slc_adopt",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "void*",
+          "name": "dispatch"
+        }
+      ],
+      "since": 4,
+      "summary": "registers the host's own COM object (called on the HOST's thread), so a script reaches the application that loaded the engine with Com.Host()"
+    },
+    {
+      "name": "slc_poll",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        }
+      ],
+      "since": 4,
+      "summary": "1 while an asynchronous run is in flight, 0 idle, negative for an unknown handle; the finished run's verdict lands in slc_last_result"
+    },
+    {
+      "name": "slc_run_text_async",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "source"
+        },
+        {
+          "type": "const char*",
+          "name": "name"
+        }
+      ],
+      "since": 4,
+      "summary": "the same run as slc_run_text, started and not waited for (0 accepted, 2 refused), which is what lets an STA host pump while the script drives it"
+    },
+    {
+      "name": "slc_run_file_async",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "path"
+        }
+      ],
+      "since": 4,
+      "summary": "slc_run_file, started and not waited for; the same rules and the same compiled-bundle refusal"
+    },
+    {
+      "name": "slc_run_bundle_bytes",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const void*",
+          "name": "data"
+        },
+        {
+          "type": "int",
+          "name": "count"
+        }
+      ],
+      "since": 2,
+      "summary": "the run's status for a compiled bundle held in memory, which is what a packaged executable needs; the run's directory is the session's home"
+    },
+    {
+      "name": "slc_main_owns",
+      "returns": "int",
+      "params": [
+        {
+          "type": "const char*",
+          "name": "argument"
+        }
+      ],
+      "since": 2,
+      "summary": "1 when the engine's own argument dispatch owns this first argument (--compile, --repl, --mcp, ...), so a launcher tells its arguments from the CLI's"
+    },
+    {
+      "name": "slc_main",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "argvJson"
+        }
+      ],
+      "since": 2,
+      "summary": "the code the process would exit with, from the engine's own dispatch with a JSON array standing in for its command line (no arguments is the REPL)"
+    },
+    {
+      "name": "slc_run_bundle",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "path"
+        }
+      ],
+      "since": 2,
+      "summary": "the run's status for a .slcbc: one carrying its program as source runs that source, a source-less one runs its compiled entry"
+    },
+    {
+      "name": "slc_call",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        },
+        {
+          "type": "const char*",
+          "name": "name"
+        },
+        {
+          "type": "const char*",
+          "name": "argsJson"
+        }
+      ],
+      "since": 2,
+      "summary": "the call's status for a function the session already has, with the return value in slc_last_result's Result and a JSON array of arguments"
+    },
+    {
+      "name": "slc_cancel",
+      "returns": "int",
+      "params": [
+        {
+          "type": "int64_t",
+          "name": "handle"
+        }
+      ],
+      "since": 2,
+      "summary": "0 the request was made, 2 nothing was running; the one verb callable from another thread while a run is in flight"
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "output",
+      "bit": 0,
+      "since": 2,
+      "summary": "slc_set_output and its line callback, with channel 0 for print and 1 for the engine's log lines"
+    },
+    {
+      "name": "call",
+      "bit": 1,
+      "since": 2,
+      "summary": "slc_call, and Result in the verdict, so a host calls what a run declared"
+    },
+    {
+      "name": "cancel",
+      "bit": 2,
+      "since": 2,
+      "summary": "slc_cancel, the one verb a host may call while a run is in flight"
+    },
+    {
+      "name": "bundles",
+      "bit": 3,
+      "since": 2,
+      "summary": "slc_run_bundle and slc_run_bundle_bytes, the compiled-payload verbs"
+    },
+    {
+      "name": "main",
+      "bit": 4,
+      "since": 2,
+      "summary": "slc_main and slc_main_owns, the executable's own argument dispatch"
+    },
+    {
+      "name": "async",
+      "bit": 5,
+      "since": 4,
+      "summary": "slc_run_text_async, slc_run_file_async and slc_poll, the verbs that return before the run does"
+    },
+    {
+      "name": "adopt",
+      "bit": 6,
+      "since": 4,
+      "summary": "slc_adopt, which registers the host's own object so Com.Host() reaches it"
+    },
+    {
+      "name": "com",
+      "bit": 7,
+      "since": 5,
+      "summary": "the in-proc COM server (ScriptLangCore.Session, DllGetClassObject), which only the Embed configuration compiles: the one build-dependent bit"
+    },
+    {
+      "name": "sandbox",
+      "bit": 8,
+      "since": 5,
+      "summary": "the session honors the \"dirs\" and \"deny\" options, so a host can confine a script's paths and forbid the process, network, UI, COM and clipboard families"
+    }
+  ],
+  "generated": [
+    {
+      "path": "bindings/ScriptLangCore.h",
+      "language": "c"
+    },
+    {
+      "path": "bindings/ScriptLangCore.cs",
+      "language": "csharp"
+    },
+    {
+      "path": "bindings/scriptlangcore.py",
+      "language": "python"
+    },
+    {
+      "path": "docs/embed/howto.html",
+      "language": "html-block",
+      "marker": "abi-table"
+    },
+    {
+      "path": "docs/embed/howto.html",
+      "language": "html-block",
+      "marker": "abi-capabilities"
+    }
+  ]
+}

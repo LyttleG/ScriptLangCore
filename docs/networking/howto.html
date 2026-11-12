@@ -144,13 +144,13 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
 <p>A server and a client in one script, both pumped by the same loop. This is the smallest complete round trip: the client is given an id by the server, sends a line, and gets the echo back.</p>
 <pre><code>var port = 9300;
 var svr = Server.Create(port, "local", "probe");
-svr.OnConnect(fun(string id) { print("connect " + id); });
-svr.OnMessage(fun(string id, string msg) { svr.Send(id, "echo:" + msg); });
+svr.OnConnect((string id) => { print("connect " + id); });
+svr.OnMessage((string id, string msg) => { svr.Send(id, "echo:" + msg); });
 svr.Start();
 
 var cli = Client.Create("127.0.0.1", port, 4000);
-cli.OnId(fun(string id) { print("my id is " + id); });
-cli.OnMessage(fun(string msg) { print("got " + msg); });
+cli.OnId((string id) => { print("my id is " + id); });
+cli.OnMessage((string msg) => { print("got " + msg); });
 cli.Connect();
 cli.Send("hello");
 
@@ -172,11 +172,11 @@ while (true) { svr.Pump(); cli.Pump(); Application.DoEvents(); sleep(50); }</cod
 <p>Register them before <code>Start()</code>: the accept loop runs on its own threads and only QUEUES what it sees, so a handler registered later still receives what arrives after it, but anything that arrived first has nobody to answer.</p>
 <table>
 <tr><th>Handler</th><th>Runs when</th></tr>
-<tr><td><code>OnPending(fun(string id))</code></td><td>A client finished the WebSocket handshake and has its id, but has not acknowledged it yet.</td></tr>
-<tr><td><code>OnConnect(fun(string id))</code></td><td>The client acknowledged its id, which is the point where the server counts it. This is the one to use.</td></tr>
-<tr><td><code>OnMessage(fun(string id, string msg))</code></td><td>A text message arrived from that client.</td></tr>
-<tr><td><code>OnDisconnect(fun(string id))</code></td><td>That client is gone, closed or kicked.</td></tr>
-<tr><td><code>OnError(fun(string who, string err))</code></td><td>A listener or connection failure. <code>who</code> is the server or the client id, <code>err</code> is the engine's message.</td></tr>
+<tr><td><code>OnPending((string id) => { ... })</code></td><td>A client finished the WebSocket handshake and has its id, but has not acknowledged it yet.</td></tr>
+<tr><td><code>OnConnect((string id) => { ... })</code></td><td>The client acknowledged its id, which is the point where the server counts it. This is the one to use.</td></tr>
+<tr><td><code>OnMessage((string id, string msg) => { ... })</code></td><td>A text message arrived from that client.</td></tr>
+<tr><td><code>OnDisconnect((string id) => { ... })</code></td><td>That client is gone, closed or kicked.</td></tr>
+<tr><td><code>OnError((string who, string err) => { ... })</code></td><td>A listener or connection failure. <code>who</code> is the server or the client id, <code>err</code> is the engine's message.</td></tr>
 </table>
 
 <h3>Sending and inspecting</h3>
@@ -203,10 +203,10 @@ while (true) { svr.Pump(); cli.Pump(); Application.DoEvents(); sleep(50); }</cod
 <tr><td><code>Pump()</code></td><td>nothing</td><td>Runs whatever is queued, then returns.</td></tr>
 <tr><td><code>Wait()</code></td><td>nothing</td><td>Blocks until the client is disconnected, running the queued callbacks as they arrive.</td></tr>
 <tr><td><code>Disconnect()</code>, <code>Dispose()</code></td><td>nothing</td><td>Close the socket. <code>Dispose</code> is <code>Disconnect</code> plus "do not wait for a finalizer", so it is what a <code>using</code> block reaches.</td></tr>
-<tr><td><code>OnId(fun(string id))</code></td><td></td><td>The server assigned this client its id.</td></tr>
-<tr><td><code>OnMessage(fun(string msg))</code></td><td></td><td>A text message arrived.</td></tr>
-<tr><td><code>OnDisconnect(fun())</code></td><td></td><td>The connection ended.</td></tr>
-<tr><td><code>OnError(fun(string err))</code></td><td></td><td>A transport failure, as the engine's message.</td></tr>
+<tr><td><code>OnId((string id) => { ... })</code></td><td></td><td>The server assigned this client its id.</td></tr>
+<tr><td><code>OnMessage((string msg) => { ... })</code></td><td></td><td>A text message arrived.</td></tr>
+<tr><td><code>OnDisconnect(() => { ... })</code></td><td></td><td>The connection ended.</td></tr>
+<tr><td><code>OnError((string err) => { ... })</code></td><td></td><td>A transport failure, as the engine's message.</td></tr>
 </table>
 
 <div class="note"><strong><code>Connect()</code> answers the WebSocket handshake's result.</strong> <code>true</code> means the socket opened AND the upgrade completed, which is why a refused port, a timeout or a server that answers the handshake with something else all return <code>false</code> and report through <code>OnError</code>. <code>IsConnected</code> stays the property to poll inside a loop, and <code>OnId</code> firing is the moment the session is usable.</div>
@@ -215,7 +215,7 @@ while (true) { svr.Pump(); cli.Pump(); Application.DoEvents(); sleep(50); }</cod
 <p>The sockets run on their own threads and never call a script directly. Everything they see is queued, and a script runs the queue with one of three members. The three modes, and what each one gives a script:</p>
 <table>
 <tr><th>Mode</th><th>Member</th><th>Shape</th></tr>
-<tr><td>Blocking server</td><td><code>server.Listen()</code></td><td>Loops until <code>Stop()</code>, running the queued callbacks. Nothing else on that thread runs, so a script that must also do work calls it on its own thread (a <code>Events.Create()</code> producer, <code>feed.Start(fun(EventSubject f, EventSubject s) { svr.Listen(); })</code>). An engine <code>CreateTimer</code> does NOT fire inside it: a timer armed to stop the server never ran, and <code>Listen()</code> never returned.</td></tr>
+<tr><td>Blocking server</td><td><code>server.Listen()</code></td><td>Loops until <code>Stop()</code>, running the queued callbacks. Nothing else on that thread runs, so a script that must also do work calls it on its own thread (a <code>Events.Create()</code> producer, <code>feed.Start((EventSubject f, EventSubject s) => { svr.Listen(); })</code>). An engine <code>CreateTimer</code> does NOT fire inside it: a timer armed to stop the server never ran, and <code>Listen()</code> never returned.</td></tr>
 <tr><td>Blocking client</td><td><code>client.Wait()</code></td><td>Blocks until that client is disconnected, running the queued callbacks, which is what a command-line client ends with. With a producer thread disconnecting it after 800 ms, <code>Wait</code> returned after 866 ms with the message already delivered.</td></tr>
 <tr><td>Non blocking</td><td><code>server.Pump()</code>, <code>client.Pump()</code></td><td>Runs what is queued and returns, which is the mode for a UI or for a script driving several things at once.</td></tr>
 </table>
@@ -253,12 +253,12 @@ svr.Pump();                  // a file request does not need the script, this on
 
 <p>The two roles in one script, which is the shape the probe makes possible:</p>
 <pre><code>var s = Server.Create(8080, "external", "site", "C:/www");
-s.OnMessage(fun(string id, string msg) { s.Send(id, "echo:" + msg); });
+s.OnMessage((string id, string msg) => { s.Send(id, "echo:" + msg); });
 s.Start();   // files under C:/www, and a WebSocket session, on the same port</code></pre>
 
 <h2 id="middleware">Connection middleware</h2>
 <p>Every accepted connection passes through <code>tcp.Use</code> BEFORE the engine reads a byte of it, so a handler can refuse by address or close the connection outright. The context and the two members are documented in the language reference, under <code>tcp.Use</code>; the short shape is:</p>
-<pre><code>tcp.Use(fun(TcpContext ctx, Action next) {
+<pre><code>tcp.Use((TcpContext ctx, Action next) => {
     if (!ctx.RemoteAddress.StartsWith("127.0.0.1:")) { ctx.Close(); return; }
     next();
 });</code></pre>

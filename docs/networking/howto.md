@@ -28,9 +28,9 @@ svr.Start();
 ### Event handlers (set BEFORE Start)
 
 ```
-svr.OnConnect(fun(clientId) { ... });
-svr.OnMessage(fun(clientId, msg) { ... });
-svr.OnDisconnect(fun(clientId) { ... });
+svr.OnConnect((clientId) => { ... });
+svr.OnMessage((clientId, msg) => { ... });
+svr.OnDisconnect((clientId) => { ... });
 ```
 
 - `OnConnect`, fires when a client completes the WebSocket handshake. `clientId` is a unique 12-char hex string.
@@ -69,8 +69,8 @@ cli.Connect();     // returns bool
 ### Event handlers (set BEFORE Connect)
 
 ```
-cli.OnMessage(fun(msg) { ... });
-cli.OnDisconnect(fun() { ... });
+cli.OnMessage((msg) => { ... });
+cli.OnDisconnect(() => { ... });
 ```
 
 ### Sending
@@ -123,12 +123,12 @@ The convention for system-level messages uses `__` prefix. These are handled by 
 var svr = Server.Create(8080, "internal", "Demo");
 svr.Start();
 
-svr.OnConnect(fun(id) {
+svr.OnConnect((id) => {
     print("Client connected: " + id);
     svr.Send(id, "__welcome:" + id.Substring(id.Length - 4));
 });
 
-svr.OnMessage(fun(id, msg) {
+svr.OnMessage((id, msg) => {
     svr.Broadcast("[" + id + "] " + msg, id);
 });
 
@@ -139,7 +139,7 @@ svr.Listen();  // blocks
 
 ```
 var cli = Client.Create("localhost", 8080);
-cli.OnMessage(fun(msg) { print(msg); });
+cli.OnMessage((msg) => { print(msg); });
 cli.Connect();
 cli.Send("Hello!");
 cli.Wait();  // blocks dispatching events
@@ -151,7 +151,7 @@ Use `cli.Pump()` in a loop to interleave event dispatch with input processing:
 
 ```
 var cli = Client.Create("localhost", 8080);
-cli.OnMessage(fun(msg) { print(msg); });
+cli.OnMessage((msg) => { print(msg); });
 cli.Connect();
 
 var line = ".";
@@ -165,4 +165,4 @@ cli.Disconnect();
 
 ## Full Chat Demo
 
-See `assets/language/runtime/ws_chat_server.slc` and `ws_chat_client.slc` for a complete chat implementation with broadcasts, whispers, nick changes, and keep-alive.
+See `assets/language/samples/network/ws_chat_server.slc` and `ws_chat_client.slc` for a complete chat implementation with broadcasts, whispers, nick changes, and keep-alive.

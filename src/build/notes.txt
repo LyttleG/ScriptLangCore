@@ -1,0 +1,84 @@
+Cas 1, Le cert est dans Current User\My → importe-le dans Local Machine :
+# Exporte depuis Current User (Cert:\CurrentUser\ mais il existe aussi Cert:\LocalMachine\)
+$cert = Get-Item Cert:\CurrentUser\My\0C13FBFBBFBA611D1DA4D5A5E6D7BC898BA5E9A7
+Export-PfxCertificate -Cert $cert -FilePath C:\temp\cert.pfx -Password (Read-Host -AsSecureString "Password")
+
+# Réimporte dans Local Machine
+Import-PfxCertificate -FilePath C:\temp\cert.pfx -CertStoreLocation Cert:\LocalMachine\My -Password (Read-Host -AsSecureString "Password")
+Cas 2, Le cert est bien là mais la clé privée est inaccessible → donne accès à NETWORK SERVICE (ou le compte qui fait tourner ton appli) :
+
+$cert = Get-Item Cert:\LocalMachine\My\0C13FBFBBFBA611D1DA4D5A5E6D7BC898BA5E9A7
+$keyPath = $cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName
+$fullPath = "C:\ProgramData\Microsoft\Crypto\RSA\MachineKeys\$keyPath"
+
+$acl = Get-Acl $fullPath
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule("NETWORK SERVICE","Read","Allow")
+$acl.AddAccessRule($rule)
+Set-Acl $fullPath $acl
+
+
+# Start MCP on port 8765 with REPL for live testing
+
+#-----------------------------------------------------------
+# HTTP (default)
+#-----------------------------------------------------------
+ScriptLangCore.exe --mcp --port 8765 --repl --allowed-dir C:\Projects
+
+#-----------------------------------------------------------
+# HTTPS (requires cert binding first)
+#-----------------------------------------------------------
+ScriptLangCore.exe --mcp --url https://+:8765/ --repl --allowed-dir C:\Projects
+
+# Use the .NET HTTPS development certificate which is already in the Local Machine store
+# Find its thumbprint:
+certutil -store -user My | findstr /i "sha1"
+
+# Or check certlm (Local Machine), the dev cert is auto-installed there by dotnet dev-certs certutil -store My | findstr /i "sha1"
+Then use that thumbprint instead
+
+#-----------------------------------------------------------
+# To set up HTTPS locally:
+#-----------------------------------------------------------
+
+# 1. Check if your cert is in Current User store (certmgr.msc) instead of Local Machine (certlm.msc)
+#    Run: certlm.msc (Local Machine), if your dev cert isn't there, import it:
+
+# 2. Export from Current User with private key:
+certutil -user -exportpfx -p "password123" MY dc40e6b404fde6c692946efbe0e679193330e830 mycert.pfx
+
+# 3. Import into Local Machine:
+certutil -importpfx -p "password123" mycert.pfx
+
+# 4. Grant NETWORK SERVICE read access to the private key:
+#    (Find the key in: certlm.msc → Personal → Certificates → right-click → All Tasks → Manage Private Keys)
+#    Add: NETWORK SERVICE with Read access
+
+# 5. Now bind should work:
+netsh http add sslcert ipport=0.0.0.0:8767 certhash="dc40e6b404fde6c692946efbe0e679193330e830" appid="{00000000-0000-0000-0000-000000000000}"
+
+# 6. Start with HTTPS
+ScriptLangCore.exe --mcp --url https://+:8767/
+
+# In the REPL:
+# >>> .mcp  → list registered tools
+
+.call test_string {"message":"hello world"}
+.call test_int {"a":42,"b":58}
+.call test_float {"value":3.14,"multiplier":2}
+.call test_bool {"flag":true,"enabled":false}
+.call test_null {}                           # no value → null
+.call test_null {"value":null}               # explicit null
+.call test_mixed {"name":"widget","count":5,"price":9.99,"active":true}
+.call test_object {"data":{"nested":"json","count":3}}
+.call test_array {"items":[1,2,3,"four"]}
+.call test_all {"s":"hello","i":7,"f":2.5,"b":true,"o":{"x":1},"a":["a","b"],"n":null}
+
+# The MCP server handles AI requests in the background simultaneously.
+
+# SPAM
+$body = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
+for ($i=0; $i -lt 10000; $i++) { 
+  Invoke-WebRequest -Uri http://localhost:8765/ -Method Post -Body $body -ContentType "application/json" | Out-Null
+  Start-Sleep -Milliseconds 10
+}
+Write-Host "Done"

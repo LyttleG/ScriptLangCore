@@ -1,0 +1,144 @@
+# Archives
+*.zip
+*.7z
+
+# Script / intermediate
+*.slc
+*.script
+*.ui
+*.inc
+*.slcbc
+# The manifest `--compile` writes beside a bundle (`<name>.slcbc.sha256`). A build artifact like the bundle itself: it
+# belongs in the repository only when you decide to SHIP it, and then it is added by name.
+*.slcbc.sha256
+
+# Images
+*.jpg
+*.jpeg
+*.png
+*.ico
+*.bmp
+
+# .NET build artifacts
+bin/
+obj/
+publish-aot/
+publish-dll/
+publish-launcher/
+# The installer ISCC writes: built from the three publish folders above, never committed.
+setup/output/
+*.user
+*.suo
+*.log
+*.db
+*.DotSettings
+.idea/
+.codegraph/
+.vs/
+.vscode/
+.reasonix/
+*.nupkg
+
+# OS
+.DS_Store
+Thumbs.db
+assets/lib/ClassLib.dll
+superpowers-reasonix-main/
+assets/language/lib/ClassLib.dll
+assets/language/sqlite/bench.py
+assets/language/sqlite/bench_py.py
+# showcase_data.csv is now TRACKED, beside the samples that read it (it was ignored by a path that no longer exists).
+_check_examples.py
+_fix_item4.csx
+_fix_test.py
+_fix_test2.py
+_fix_test3.py
+_fix_test4.py
+_test_dict.py
+compile_jit.bat
+wsScriptCore - Code.md
+assets/language/repl/_bench_cmds.txt
+assets/language/sqlite/mydb.sqlite
+assets/language/sqlite/sqlite3.dll
+assets/language/sqlite/REPL/test_gc.txt
+C_code/SqLiteConnection.cs
+docs/reasonix/plans/2026-07-02-interpreter-manager-plan.md
+docs/reasonix/plans/2026-07-06-top-level-access-modifiers-plan.md
+
+# The repl suites ARE the test suite, so they must be reviewable and their failures visible: in 2026-09,
+# 220 of 410 were untracked under the blanket *.script rule above, which is how a failing suite
+# (crash_yieldexpr, two stale assertions) stayed invisible, neither in git nor in any registry.
+# The blanket rule still applies in the rest of the tree.
+!assets/language/repl/**/*.slc
+
+# ...and the SCRATCH tree: the one-off repros, print-only probes and older ad-hoc tests that used to sit in
+# the gate directory (140 of them). They are NOT suites, so the gate does not run them, but they are kept
+# TRACKED because this repository's records cite several by name and a repro nobody can read is not evidence.
+!assets/language/scratch/**/*.slc
+
+# ...and the HAND-RUN CORPUS (assets/language/misc), which used to be gitignored. It is the maintainer's own
+# regression set, run by src/build/run-misc-scripts.sh: 120 scripts that caught three real defects in one
+# afternoon (a Go-inspired delegate-name refusal, an Action`1`/`Action`2` arity bug among them). Evidence nobody
+# can read is not evidence, so it is TRACKED now, grouped by topic, each group keeping its numbered order.
+!assets/language/misc/**/*.slc
+!assets/language/misc/**/*.inc
+
+# ...and the COM samples, for a different reason: they are the EVIDENCE behind numbers this repository documents
+# (docs/language/index.html quotes excel_vba_bench.script, excel_speed_bench.script and friends), and evidence
+# nobody else can read is not evidence. Tracking them does NOT make them suites: SUITE_DIR is still the repl
+# directory, so nothing here is run by the runner or seen by the checkers.
+!assets/language/com/*.slc
+# The bytecode tooling samples (bc_compile_run.script drives a child REPL over the
+# dot commands), same reason as the com samples: the blanket *.script rule above
+# keeps a tracked sample out of the index.
+!assets/language/bc/*.slc
+
+# ...and the DEV INSTRUMENTS (assets/language/probes/*.script), which used to live in tools/ as
+# tools/probe-*.script. They moved because tools/ IS the MCP server's tool directory: the server EXECUTES
+# every tools/*.script at startup, so a probe that blocks or breaks took the server down with it (measured:
+# cdb-handles-probe.script's DebugBreak killed the process, control-behavior-probe.script hung it). They are
+# still shipped next to the executable, under assets/, and still tracked here.
+!assets/language/probes/*.slc
+
+# ...and the UI tree (assets/language/ui/**): the demos a reader can run, the RAD designer's own work, the .ui
+# sample data the designer loads, and the library files those demos import. Tracking them does not make them
+# suites either: SUITE_DIR is still the repl directory, so the runner and the checkers never look here.
+# What that tree PRODUCES stays ignored, named rather than by extension, so un-ignoring the sources cannot sweep
+# an output in: the designer's "Gen code" button writes generated_form*.script, the *- Copie files are
+# hand-made backups, and sample_uizz.ui is the designer's scratch model (a temporary file: the samples the
+# self-test reads are sample_ui.ui and sample_uiz.ui). (*.7z, *.slcbc and *.log are already ignored above by
+# extension.)
+!assets/language/ui/**/*.slc
+!assets/language/ui/**/*.ui
+!assets/language/htmx/**/*.slc
+!assets/language/htmx/**/*.ico
+assets/language/ui/demos/generated_form*.slc
+assets/language/ui/**/* - Copie.slc
+assets/language/ui/demos/sample_uizz.ui
+
+# Reasonix host config and session state, plus one stale artifact. None is used by the project: no code in
+# src/, tools/ or assets/ reads them (only old plan docs mention the paths). reasonix.toml is the host's live
+# config and .reasonix/ is its session state, which the tooling rewrites during a session, keeping them
+# tracked made the working tree permanently dirty. They stay on disk; processed.xml was deleted as dead
+# weight (17,889 lines, unchanged since the initial commit).
+.reasonix/
+reasonix.toml
+processed.xml
+
+# The VBA baseline workbook is generated: import assets/language/com/VbaBench.bas and save it as this file.
+assets/language/com/VbaBench.xlsm
+# Python bytecode, because the repo ships two runnable samples (bindings\BasicTest.py and bindings\BridgeTest.py) and
+# running one writes this folder beside them, where it would otherwise sit untracked in every `git status`.
+__pycache__/
+# The C carrier's built exe: bindings\bridge_host.c is compiled in place by the command in its own header, and that
+# build writes this one file beside it, so it is ignored rather than left untracked in every `git status`.
+/bindings/bridge_host.exe
+# Test artifacts a suite writes into the working directory. They are untracked by construction, so a gate run used
+# to dirty the tree with files nobody wrote on purpose (json_test_temp.json and mydb.sqlite from the json and sqlite
+# suites, xl_smoke_*.xlsx from the Excel smoke suites). Named specifically rather than by extension, so a real
+# .json, .sqlite or .xlsx a person puts here is still visible to git.
+/json_test_temp.json
+/mydb.sqlite
+/xl_smoke_*.xlsx
+# The native resource compiler ILC runs leaves a Visual Studio .aps beside the launcher's .rc
+*.aps

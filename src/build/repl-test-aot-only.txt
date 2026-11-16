@@ -1,0 +1,13 @@
+# Suites that must run ONLY on the NativeAOT build: they assert that MILLIONS of nested calls survive,
+# which is true on AOT (32MB stack, memory-derived frame cap) and impossible on JIT by design (a
+# 24-frame limit, src/Interpreter/Interpreter.cs `MaxCallDepth`, marked `// platform: limit`).
+#
+# Format: <suite-name>   # why it is AOT-only
+#
+# These are NOT deleted and NOT parked in repl-test-known-fail.txt: they are the EVIDENCE for the AOT
+# robustness claim, so they must keep RUNNING and PASSING on the shipping platform. run-repl-tests.sh
+# skips them on every non-AOT platform and counts the skip; it still runs them on AOT. Keep the reason
+# on the same line, an entry without one is a divergence nobody justified.
+_depth_vmcheck.slc   # boom(1000_000): ~1M nested calls. Survives on AOT's 32MB stack; the JIT's 24-frame cap cannot reach it.
+ref_deep_test.slc     # rec(ref x, 1_300_000): 1.3M deep ref recursion. Same AOT-only robustness claim as _depth_vmcheck.
+                     # (was refdeep.slc; renamed when the gate was split into topic folders)

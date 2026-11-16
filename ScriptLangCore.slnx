@@ -1,0 +1,11 @@
+<Solution>
+  <!-- THE ENGINE, and the two projects that exist BESIDE it rather than inside it. `src/embed/` is the host that drives
+       the published DLL through its C ABI, and `src/embed/launcher/` is the shipped AOT front end that stands in for the
+       CLI. Both are separate programs, so neither references the engine: they load the published artifact, which is what
+       makes them a check of the artifact rather than of the sources. -->
+  <Project Path="ScriptLangCore.csproj" />
+  <Folder Name="/src/embed/">
+    <Project Path="src/embed/EmbedCheck.csproj" />
+    <Project Path="src/embed/launcher/EmbedLauncher.csproj" />
+  </Folder>
+</Solution>

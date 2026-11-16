@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE HOST THAT CHECKS THE C ABI. It is a project of its own because a host has to be a SEPARATE PROGRAM: the
+       engine's own suites run inside the engine, and nothing a suite can do loads the published DLL. `src/build/embed-check.sh`
+       is the runner, and the root csproj excludes this folder from its own compile items (a second `Program.cs` would
+       otherwise be a second entry point). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>embed-check</AssemblyName>
+    <RootNamespace>EmbedCheck</RootNamespace>
+    <!-- This host is JIT on purpose: what is under test is the DLL's native surface. -->
+    <PublishAot>false</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- THE BINDINGS THIS HOST BINDS WITH are the GENERATED ones (`bindings/ScriptLangCore.cs`, rendered from
+         `docs/embed/abi.json` by `src/build/gen-abi-bindings.ps1`), not a second set of delegate declarations typed here.
+         That is what makes the harness evidence about the manifest: if a signature in the manifest is wrong, this
+         project does not compile, and `src/build/check-abi-manifest.sh` keeps the file current. It is one plain C# file
+         with no engine dependency, so this project still references nothing from the engine. -->
+    <Compile Include="../../bindings/ScriptLangCore.cs" />
+    <!-- THIS PROJECT NESTS ANOTHER ONE (`launcher/`, the shipped AOT front end), so that project's files must not travel
+         here: the default glob would compile its `Program.cs` as a SECOND entry point and its generated AssemblyInfo as a
+         duplicate set of assembly attributes (CS0017/CS0579). `**/obj/**` is stated too, because the SDK's own exclusion
+         is per PROJECT and not per subfolder, which is exactly how the nested project's intermediates got in. -->
+    <Compile Remove="launcher/**" />
+    <Compile Remove="**/obj/**" />
+    <Compile Remove="**/bin/**" />
+  </ItemGroup>
+
+</Project>

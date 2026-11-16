@@ -1,0 +1,21 @@
+# Scripts the runner does NOT execute: they need a GUI, a network peer, a server, or they block
+# on input/hardware. Shell-style globs, one per line; '#' starts a comment.
+demo_*              # open windows / wait for interaction
+*ui_*               # GUI widgets
+*_ui*               # GUI widgets
+*winform*           # GUI
+*console*           # console-mode demos
+*mcp*               # MCP servers (blocking)
+*tcp*               # TCP peers
+*server*            # servers (blocking)
+*client*            # network clients
+*socket*            # sockets
+*scheduler*         # scheduling demos (long-running)
+*timer*             # timer demos (long-running)
+*hotkey*            # global hotkeys (hardware)
+*mci*               # multimedia
+*playwright*        # browser automation
+*camera*            # hardware
+*audio*             # hardware
+*ffmpeg*            # needs the ffmpeg binary + one machine's media files (C:/Users/..., *.mp4), a local setup, not a suite
+menu_bar_test.slc - a MANUAL repro of the menu documentation sample: it opens a window and waits for a real right-click, so it never exits on its own. The automated half is menu_test.slc, which shows and dismisses a popup from timers.

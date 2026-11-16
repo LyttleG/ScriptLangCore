@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Bridge: How To</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --accent3: #d29922;
+  --code-bg: #1c2128;
+  --inline-code: #f0883e;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+h1 { font-size: 2rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.02em; }
+h1 small { font-size: 1rem; color: var(--text-dim); font-weight: 400; }
+h2 { font-size: 1.4rem; font-weight: 600; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.1rem; font-weight: 600; margin: 28px 0 10px; }
+h4 { font-size: 0.95rem; font-weight: 600; margin: 20px 0 8px; color: var(--accent); }
+p { margin-bottom: 14px; color: var(--text-dim); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+strong { color: var(--text); }
+code {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--inline-code);
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 16px 0;
+  background: rgba(88,166,255,0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-dim);
+}
+blockquote strong { color: var(--text); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 0.85rem;
+}
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+th { background: var(--surface); font-weight: 600; color: var(--text); }
+td { color: var(--text-dim); }
+td code { font-size: 0.8rem; }
+ul, ol { margin: 8px 0 16px 20px; color: var(--text-dim); }
+li { margin-bottom: 4px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.note {
+  background: rgba(56,139,253,0.08);
+  border: 1px solid rgba(56,139,253,0.2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.tag-ok { background: rgba(63,185,80,0.15); color: var(--accent2); }
+.tag-no { background: rgba(210,153,34,0.15); color: var(--accent3); }
+.tag-info { background: rgba(88,166,255,0.15); color: var(--accent); }
+.toc { margin: 16px 0 24px; }
+.toc a { display: inline-block; margin: 2px 12px 2px 0; font-size: 0.88rem; }
+</style>
+</head>
+<body>
+
+<h1>The Bridge: How To <small>one contract, five carriers</small></h1>
+
+<p>Two programs that talk to each other cannot hand each other an object: a C host has no script dictionary, the engine cannot see a C struct, a Python host has no COM pointer, and a COM client has no UTF-8 buffer of its own. What crosses every one of those boundaries is UTF-8 text. The Bridge is therefore <strong>one request document in and one response document out, in both directions</strong>, and the object graph stays where it lives.</p>
+
+<p>This page covers the whole contract and the five carriers that were driven through it end to end: <a href="#c">C</a>, <a href="#csharp">C#</a>, <a href="#python">Python</a>, <a href="#powershell">PowerShell</a> and <a href="#com">COM</a>. Each section carries a complete sample and the one or two details that decide whether it works.</p>
+
+<div class="toc">
+  <a href="#what">What it is</a>
+  <a href="#envelope">The envelope</a>
+  <a href="#rules">The seven rules</a>
+  <a href="#refusals">The refusals</a>
+  <a href="#failures">Two kinds of failure</a>
+  <a href="#script">The script side</a>
+  <a href="#carriers">The five carriers</a>
+  <a href="#depth">No re-entry, and threads</a>
+  <a href="#wire">What travels</a>
+  <a href="#checking">Checking a carrier</a>
+  <a href="#trouble">Troubleshooting</a>
+  <a href="#where">Where the code is</a>
+</div>
+
+<h2 id="what">What it is</h2>
+<p>Two doors, one dispatch, so a host and a script cannot disagree about what a request means:</p>
+<table>
+  <tr><th style="width:34%;">Door</th><th>What it does</th></tr>
+  <tr><td><code>Bridge.Serve(handler)</code></td><td>The script registers the function that answers the host. The host drives it.</td></tr>
+  <tr><td><code>Bridge.Handle(request)</code></td><td>The host to script door, as text in and text out. This is what every carrier calls underneath, and it is also what a test drives, so a stub host is a script.</td></tr>
+  <tr><td><code>Bridge.Call(request)</code></td><td>The script to host door. Answers the host's response document <strong>already parsed</strong>, so a script reads <code>answer["r"]["n"]</code>.</td></tr>
+</table>
+
+<p>The carrier only decides how the document travels. A C host installs a callback with <code>slc_set_bridge</code> and drives the script with <code>slc_invoke</code>; a COM client reaches the script with one <code>Invoke</code> member; a .NET host that owns the interpreter sets one field. Swapping the carrier changes no script, which is the reason the contract exists as a contract rather than as four protocols that resemble each other.</p>
+
+<h2 id="envelope">The envelope</h2>
+<p>A request is a JSON object with four members. Two are required.</p>
+<table>
+  <tr><th style="width:12%;">Member</th><th style="width:18%;">Type</th><th>Meaning</th></tr>
+  <tr><td><code>v</code></td><td>whole number</td><td><strong>Required.</strong> The contract version. This build speaks <code>1</code>, and another value is refused by name rather than mis-read.</td></tr>
+  <tr><td><code>id</code></td><td>any JSON value</td><td>Optional. The caller's correlation id. It is echoed <strong>verbatim</strong>, including an explicit <code>null</code>, and a request with no <code>id</code> member gets no <code>id</code> in the answer. The dispatcher writes it, so a handler cannot forget it or substitute somebody else's. It is how a host matches an answer to its request in a log: no carrier allows two requests outstanding at once, so pipelining would need a batch, which this version does not define.</td></tr>
+  <tr><td><code>m</code></td><td>text</td><td><strong>Required.</strong> The verb, a dotted name such as <code>invoice.post</code>. It is the only thing a handler dispatches on.</td></tr>
+  <tr><td><code>p</code></td><td>JSON object</td><td>Optional. The parameters. An explicit <code>null</code> is the same as leaving it out, which is stated rather than left to a handler to guess. Anything large is paged <em>inside</em> it, because a contract that allows one huge value invites a payload no reader can bound.</td></tr>
+</table>
+
+<p>A response is also one object, and exactly one of <code>r</code> or <code>e</code> is present:</p>
+<table>
+  <tr><th style="width:12%;">Member</th><th style="width:18%;">Type</th><th>Meaning</th></tr>
+  <tr><td><code>v</code></td><td>number</td><td>The contract version the answer was built for. Always <code>1</code>, written by the dispatcher.</td></tr>
+  <tr><td><code>id</code></td><td>any</td><td>The request's id, echoed by construction, including <code>null</code>. No <code>id</code> member in the request, no <code>id</code> in the answer.</td></tr>
+  <tr><td><code>ok</code></td><td>boolean</td><td><strong>Required.</strong> The verdict of the request.</td></tr>
+  <tr><td><code>r</code></td><td>any JSON value</td><td>The result, when <code>ok</code> is true.</td></tr>
+  <tr><td><code>e</code></td><td>object</td><td>The error, when <code>ok</code> is false.</td></tr>
+</table>
+
+<p>The error object's four base members are always present. <code>at</code> and <code>frames</code> appear when the engine caught the failure, and <code>retryAfter</code> and <code>details</code> when the handler has something more to say:</p>
+<table>
+  <tr><th style="width:16%;">Member</th><th>Meaning</th></tr>
+  <tr><td><code>code</code></td><td>A short, non-empty, stable name a host branches on: <code>BadRequest</code>, <code>UnsupportedVersion</code>, <code>NoSuchVerb</code> (the handler's own), or one of the engine's error codes.</td></tr>
+  <tr><td><code>message</code></td><td>One non-empty sentence, in the engine's or the handler's voice, naming what to fix. Never a CLR resource key.</td></tr>
+  <tr><td><code>retry</code></td><td>A boolean. <code>true</code> means the same request may succeed later (a busy resource), which is what a host needs to decide between an error dialog and a backoff. <code>retryAfter</code> says how long to wait.</td></tr>
+  <tr><td><code>origin</code></td><td><code>"engine"</code> when the dispatcher or the engine built the failure (a refusal, or a handler that threw), <code>"handler"</code> when the handler answered it with <code>Bridge.Fail</code> or <code>Bridge.FromError</code>. The dispatcher forces it, so a handler cannot claim the engine's voice.</td></tr>
+  <tr><td><code>retryAfter</code></td><td>A whole number of milliseconds. Meaningful when <code>retry</code> is true, and what a host uses as its backoff.</td></tr>
+  <tr><td><code>details</code></td><td>A JSON object the APPLICATION owns, such as <code>{ "field": "total" }</code>. The engine never interprets it; it is where a validation failure names the parameter that was wrong.</td></tr>
+  <tr><td><code>at</code></td><td><code>{ "file": "...", "line": 12, "col": 5 }</code>, when the ENGINE caught the failure: the script that registered the handler and the position inside it.</td></tr>
+  <tr><td><code>frames</code></td><td>The engine's call frames, innermost first, as <code>"Post [L10:C9]"</code>. Present when there are any.</td></tr>
+</table>
+
+<h4>A request and its answer</h4>
+<pre><code>{"v":1,"id":"h1","m":"echo","p":{"n":21}}
+
+{"v":1,"id":"h1","ok":true,"r":{"n":42}}
+
+{"v":1,"id":"h2","m":"nope","p":{}}
+
+{"v":1,"id":"h2","ok":false,"e":{"code":"NoSuchVerb","message":"no nope","retry":false,"origin":"handler"}}
+
+{"v":1,"id":"h3","m":"boom"}
+
+{"v":1,"id":"h3","ok":false,"e":{"code":"Unspecified","message":"boom","retry":false,"origin":"engine",
+  "at":{"file":"worker.slc","line":7,"col":9},"frames":["Post [L10:C9]"]}}</code></pre>
+
+<p>The third pair is a handler's own refusal, built with <code>Bridge.Fail</code>. The fourth is a handler that THREW: the engine turns it into the same error object, with the position and the frames a host would otherwise have to correlate by hand.</p>
+
+<h2 id="rules">The seven rules</h2>
+<ol>
+  <li><strong>One verb shape.</strong> Both directions use the same document, so a log or a fixture is readable without knowing which side produced it.</li>
+  <li><strong>No re-entry on the same session.</strong> A session serves one host request at a time. A handler MAY call the host with <code>Bridge.Call</code>; what is refused is <code>Bridge.Handle</code> on its own session, a verb issued from inside a host callback (a run posted there would wait on itself), and a host that answers <code>Bridge.Call</code> by calling back into the same session. Each of those is a loop, which is why the rule is about re-entry rather than about depth.</li>
+  <li><strong>Nothing throws across.</strong> A handler that throws becomes <code>ok:false</code> with the engine's code, message, position and frames. A host that throws, or that answers a negative length, is a refusal the script can catch at the <code>Bridge.Call</code> that reached it.</li>
+  <li><strong><code>m</code> is additive only.</strong> A verb may be added at any time. Removing one, or changing what one means, is a contract version bump, which is what <code>v</code> is for. A reader tolerates members it does not know, so a newer side does not break an older one.</li>
+  <li><strong><code>p</code> is an object, absent, or explicitly null.</strong> A null means the same as absent. Arrays and scalars travel <em>inside</em> it.</li>
+  <li><strong><code>id</code> is echoed by construction.</strong> The dispatcher rewrites it from the request, <code>null</code> included, so a handler cannot forget it. It is how a host matches an answer to its request in a log; no carrier allows two requests outstanding, so pipelining would need a batch, which version 1 does not define.</li>
+  <li><strong>A response is validated.</strong> The whole shape, not only <code>ok</code>: text that is not an object, a missing or non-boolean <code>ok</code>, an <code>ok:true</code> answer carrying <code>e</code>, an <code>e</code> that is not an object, or an error whose <code>code</code> or <code>message</code> is missing or not a non-empty string is <code>HandlerReturnedNonEnvelope</code>, never forwarded to a host that would have to guess. An <code>ok:false</code> answer carrying <code>r</code> has the <code>r</code> dropped, because exactly one of the two shapes is present.</li>
+</ol>
+
+<h2 id="refusals">The refusals</h2>
+<p>Every one of these arrives as a normal answer, so a host parses one shape and reads <code>e.code</code>.</p>
+<table>
+  <tr><th style="width:30%;">Code</th><th>When</th></tr>
+  <tr><td><code>BadRequest</code></td><td>The request is not a JSON object at all.</td></tr>
+  <tr><td><code>UnsupportedVersion</code></td><td><code>v</code> is missing, is not a whole number, or names another contract version. The message says which one it read.</td></tr>
+  <tr><td><code>MissingMethod</code></td><td><code>m</code> is missing or empty.</td></tr>
+  <tr><td><code>BadParams</code></td><td><code>p</code> is present and is not a JSON object. An explicit <code>null</code> is treated as absent.</td></tr>
+  <tr><td><code>NoHandler</code></td><td>The script has not called <code>Bridge.Serve</code>, or a later run unregistered it.</td></tr>
+  <tr><td><code>HandlerReturnedNothing</code></td><td>The handler answered null, or something that is not text. A verb must end with <code>Bridge.Ok</code> or <code>Bridge.Fail</code>.</td></tr>
+  <tr><td><code>HandlerReturnedNonEnvelope</code></td><td>The handler's text is not a JSON object, has no boolean <code>ok</code>, carries <code>e</code> beside <code>ok:true</code>, has an <code>e</code> that is not an object, or has an error whose <code>code</code> or <code>message</code> is missing or not a non-empty string.</td></tr>
+  <tr><td><code>Failed</code></td><td>A handler reported a failure without a reason, and the dispatcher filled one in.</td></tr>
+  <tr><td>the engine's own code</td><td>A handler that threw answers its own code (<code>Unspecified</code> for a plain failure, <code>DivisionByZero</code>, <code>UndefinedVariable</code>, <code>Cancelled</code>, and so on) with its message, <code>at</code> and <code>frames</code>.</td></tr>
+</table>
+
+<div class="note"><strong>A verb the host does not know is the handler's decision, not the dispatcher's.</strong> The dispatcher only checks the envelope. A handler that receives an unknown <code>m</code> and answers <code>Bridge.Fail(req["id"], "NoSuchVerb", ...)</code> is what makes the refusal app-specific; a handler that ignores the verb and answers <code>Ok</code> is equally legal, and that is the contract being silent about verbs rather than vague.</div>
+
+<h2 id="failures">Two kinds of failure</h2>
+<p><strong>A contract failure is an answer.</strong> An unknown verb, another version, a handler that threw: all of them travel INSIDE the document as <code>ok:false</code>, so the transport succeeded and the code is a value a host branches on.</p>
+<p><strong>A transport failure is not an answer.</strong> No such session, a session already running, a freed handle, a callback that could not be called: there is no document to parse, so the carrier says so in ITS OWN vocabulary and the reason goes to the carrier's error channel.</p>
+<table>
+  <tr><th style="width:16%;">Carrier</th><th style="width:34%;">Contract failure</th><th>Transport failure</th></tr>
+  <tr><td>C, C#, Python, PowerShell</td><td>The document's own <code>ok:false</code>, a non-negative length</td><td><code>slc_invoke</code> answers a NEGATIVE status; the sentence is in <code>slc_last_error</code></td></tr>
+  <tr><td>the host half (C, C#, Python, PowerShell)</td><td>the host's own <code>ok:false</code> document</td><td>the callback answers a NEGATIVE length; the script catches the refusal at <code>Bridge.Call</code></td></tr>
+  <tr><td>COM</td><td>the document's own <code>ok:false</code>, and the HRESULT stays 0</td><td>the sentence in <code>LastError</code> (a freed object, a session already running), because a member has no status to answer</td></tr>
+</table>
+<p>Putting a sentence in a buffer the host parses as JSON is how a binding ends up reporting a parse error instead of the real problem. That is why a transport failure is never a document.</p>
+
+<h2 id="script">The script side: the <code>Bridge</code> namespace</h2>
+<table>
+  <tr><th style="width:44%;">Member</th><th>What it does</th></tr>
+  <tr><td><code>Bridge.Version</code></td><td>The contract version this build speaks, as a number (<code>1</code>).</td></tr>
+  <tr><td><code>Bridge.Served</code></td><td>Whether a handler is registered, so a script can decide before it advertises anything.</td></tr>
+  <tr><td><code>Bridge.Hosted</code></td><td>Whether a host installed its side, which is what <code>Bridge.Call</code> needs.</td></tr>
+  <tr><td><code>Bridge.Serve(handler)</code></td><td>Registers the function that answers the host's requests. It takes ONE parameter, the request as a script dictionary (<code>req["m"]</code>, <code>req["p"]</code>), and answers the text <code>Bridge.Ok</code> or <code>Bridge.Fail</code> builds. <code>Bridge.Serve(null)</code> stops serving, and one handler per session means a second call replaces the first.</td></tr>
+  <tr><td><code>Bridge.Handle(request)</code></td><td>The host to script door as text. Every carrier calls it underneath.</td></tr>
+  <tr><td><code>Bridge.Call(request)</code></td><td>The script to host door. Answers the parsed response document, and refuses by name when no host installed its side.</td></tr>
+  <tr><td><code>Bridge.Ok(id, result)</code></td><td>Builds a successful response document.</td></tr>
+  <tr><td><code>Bridge.Fail(id, code, message [, retry | options])</code></td><td>Builds a failed one. <code>id</code> may be null when the request had none, and <code>code</code> and <code>message</code> must be non-empty. The fourth argument is either the <code>retry</code> boolean or an options object: <code>{ retry: true, retryAfter: 250, details: { field: "total" } }</code>. An unknown option, or one of the wrong type, is refused by name.</td></tr>
+  <tr><td><code>Bridge.FromError(id, error)</code></td><td>Turns a CAUGHT value into the contract's error object: an <code>ErrorInfo</code>, or a <code>{ code: ..., message: ... }</code> dictionary, so a failure the script handled answers in the same shape as one the engine caught. A dictionary is read member by member: <code>retry</code>, <code>retryAfter</code> and <code>details</code> travel when present, and a malformed member is refused by name.</td></tr>
+</table>
+
+<h4>A handler that serves two verbs</h4>
+<pre><code>Bridge.Serve(fun (req) {
+    var verb = "" + req["m"];
+    var id = req.ContainsKey("id") ? req["id"] : null;      <span style="color:var(--text-dim);">// echoed by the dispatcher, but read here to answer</span>
+    if (verb == "invoice.post") {
+        if (req["p"]["total"] &lt; 0) { return Bridge.Fail(id, "BadTotal", "a total cannot be negative"); }
+        return Bridge.Ok(id, { posted: true, invoice: 4171 });
+    }
+    if (verb == "invoice.get") {
+        return Bridge.Ok(id, { invoice: 4171, total: 120.50 });
+    }
+    return Bridge.Fail(id, "NoSuchVerb", "this script serves invoice.post and invoice.get, not " + verb);
+});</code></pre>
+
+<h4>Answering a failure the script handled</h4>
+<pre><code>Bridge.Serve(fun (req) {
+    var id = req.ContainsKey("id") ? req["id"] : null;
+    try {
+        return Bridge.Ok(id, { rows: Database.Rows(req["p"]) });
+    } catch (var e) {
+        return Bridge.FromError(id, e);        <span style="color:var(--text-dim);">// ErrorInfo: code, message and the frames travel as they are</span>
+    }
+});</code></pre>
+
+<h4>Calling the host</h4>
+<pre><code>if (Bridge.Hosted) {
+    var answer = Bridge.Call('{"v":1,"id":"s1","m":"customer.lookup","p":{"id":42}}');   <span style="color:var(--text-dim);">// the request document, as text</span>
+    if (answer["ok"]) { print("customer: " + answer["r"]["name"]); }
+    else { print("the host refused: " + answer["e"]["code"] + " " + answer["e"]["message"]); }
+}</code></pre>
+
+<div class="note"><strong>A stub host is just a script.</strong> <code>Bridge.Handle</code> answers the same document every carrier receives, so the contract can be tested with no host technology at all. That is what <code>assets/language/repl/interop/bridge_contract_test.slc</code> does: it decides the version, the verb, the parameters object (including an explicit <code>null</code>), a handler being served, a re-entrant call and a handler calling the host while serving, a handler's own failure, a non-envelope answer, the answer's whole shape (exactly one of <code>r</code> or <code>e</code>, and the error's <code>code</code>, <code>message</code>, <code>origin</code>, <code>retryAfter</code> and <code>details</code>), a response that names somebody else's <code>id</code> and version, and the id echoed four ways (string, numeric, absent, null). It runs on both engines.</div>
+
+<h2 id="carriers">The five carriers</h2>
+<p>Both directions are carried by the C ABI. COM carries the host to script direction. The table is the whole difference between them.</p>
+<table>
+  <tr><th style="width:13%;">Carrier</th><th style="width:29%;">The host half (a script calls back)</th><th style="width:26%;">The script half (the host asks)</th><th>The one thing to get right</th></tr>
+  <tr><td>C</td><td><code>slc_set_bridge(handle, callback, user)</code></td><td><code>slc_invoke(handle, request, buffer, capacity)</code></td><td>the two-pass length, and a NEGATIVE answer is your own refusal</td></tr>
+  <tr><td>C#</td><td>the same, with a <code>[UnmanagedFunctionPointer(Cdecl)]</code> delegate</td><td>the same</td><td>keep the delegate alive for the session's lifetime</td></tr>
+  <tr><td>Python</td><td>the same, with a <code>ctypes.CFUNCTYPE</code></td><td>the same</td><td>the buffer parameter is <code>c_void_p</code>, and write with <code>memmove</code></td></tr>
+  <tr><td>PowerShell</td><td>the same, with COMPILED callbacks (<code>Add-Type</code>)</td><td>the same</td><td>a script block cannot be a callback, and a property read goes through <code>InvokeMember</code></td></tr>
+  <tr><td>COM</td><td><span class="tag tag-no">not over COM</span> (<code>LastError</code> explains why a call could not be made, but no member installs a callback)</td><td><code>Invoke(requestJson)</code>, DISPID 8</td><td>the document IS the answer; <code>Invoke</code> does not write <code>LastResult</code></td></tr>
+</table>
+
+<div class="note">The published library is <strong>x64</strong> (PE32+). Every carrier needs a 64-bit host process: a 32-bit Python, PowerShell or Office gets "the specified module could not be found" or "class not registered", which reads like a missing install rather than a bitness mismatch.</div>
+
+<h3 id="c">C</h3>
+<p>A C host links nothing from the engine: it resolves the exports by name at run time, which is what a host without an import library does. The generated header <code>bindings/ScriptLangCore.h</code> declares all of them; the sample below spells only the six it uses and is shipped as <code>bindings/bridge_host.c</code>, so it can be built and run against an installed engine instead of retyped.</p>
+
+<pre><code>/* bridge_host.c: the Bridge contract from a C host, both directions, with no import library and NO C RUNTIME.
+ *
+ * THIS IS THE SHIPPED C CARRIER, beside `BridgeTest.py` (the Python one) in `bindings\`, the folder the installer copies
+ * to `{app}\bindings`: a host builds and runs this proof against an installed engine instead of retyping it, which is
+ * what the Bridge page's own block is (`docs\bridge\howto.html`, the C section), so the two cannot drift.
+ *
+ * BUILD, with an x86_64 MinGW-w64 GCC (see the three rules below), from this folder:
+ *   set PATH=C:\msys64\mingw64\bin;%PATH%
+ *   gcc -std=c11 -Oz -fno-stack-protector -mno-stack-arg-probe -falign-functions=1 -falign-jumps=1 ^
+ *       -falign-loops=1 -falign-labels=1 -fno-plt -s -Wall -Wextra -Werror -mconsole -ffunction-sections ^
+ *       -fno-asynchronous-unwind-tables -fno-unwind-tables -fdata-sections -fno-ident -fno-builtin ^
+ *       -Wl,--gc-sections -Wl,--build-id=none -Wl,--no-insert-timestamp -nostartfiles -nostdlib ^
+ *       -e wmainCRTStartup -o bridge_host.exe bridge_host.c -lkernel32
+ *
+ * RUN it with the engine DLL's path:
+ *   bridge_host.exe "C:\Program Files\ScriptLangCore\bin\ScriptLangCore.dll"
+ *
+ * THREE RULES THIS FILE OBEYS, because -nostartfiles -nostdlib changes what "a C program" is:
+ *   1. IT MUST BE AN x64 COMPILER, because the engine image is x64: a 32-bit host answers LoadLibrary = 193
+ *      (ERROR_BAD_EXE_FORMAT) before a single export is looked up. `gcc -dumpmachine` must say x86_64-w64-mingw32.
+ *   2. -fno-builtin, because GCC recognises the byte loops below as strlen/memcpy and would emit CALLS to them, which
+ *      nothing provides here (without it the link fails on an undefined `strlen`).
+ *   3. -lkernel32, because -nostdlib names every library explicitly: the entry point, the output and every Win32 call
+ *      come from there, and WITHOUT it the link stops on `LoadLibraryW`.
+ *
+ * WHAT IS GONE, and why: no stdio, no string.h, no main(). This program writes with WriteFile on the inherited handle
+ * and takes its one argument off GetCommandLineW, so the image is a few kilobytes instead of 250 KB of CRT.
+ */
+#define WIN32_LEAN_AND_MEAN
+#include &lt;windows.h&gt;
+#include &lt;stdint.h&gt;
+
+/* The engine's six exports this host uses, each as its OWN prototype: the names are resolved at run time, so these
+ * typedefs are what the compiler checks the host's call sites against instead of an import library. */
+typedef int64_t (*create_fn)(const char *options);
+typedef int     (*free_fn)(int64_t handle);
+typedef int     (*last_error_fn)(int64_t handle, char *buffer, int capacity);
+typedef int     (*run_text_fn)(int64_t handle, const char *source, const char *name);
+typedef int     (*set_bridge_fn)(int64_t handle, void *callback, void *user);
+typedef int     (*invoke_fn)(int64_t handle, const char *request, char *buffer, int capacity);
+typedef int32_t (*bridge_fn)(int64_t handle, void *user, const char *request, char *buffer, int32_t capacity);
+
+/* A FARPROC is a function pointer of UNKNOWN signature, so casting it to one of the types above is a cast between
+ * incompatible function types: -Wcast-function-type refuses it, correctly, because calling through such a cast is
+ * undefined. Storing its REPRESENTATION into a correctly typed pointer is the idiom that IS well defined, and these
+ * asserts are what make the copy exact rather than hopeful (every pointer is one machine word, in both image kinds). */
+_Static_assert(sizeof(FARPROC) == sizeof(void *), "a FARPROC is one machine word");
+_Static_assert(sizeof(create_fn) == sizeof(void *), "an export pointer is one machine word");
+_Static_assert(sizeof(free_fn) == sizeof(void *), "an export pointer is one machine word");
+_Static_assert(sizeof(last_error_fn) == sizeof(void *), "an export pointer is one machine word");
+_Static_assert(sizeof(run_text_fn) == sizeof(void *), "an export pointer is one machine word");
+_Static_assert(sizeof(set_bridge_fn) == sizeof(void *), "an export pointer is one machine word");
+_Static_assert(sizeof(invoke_fn) == sizeof(void *), "an export pointer is one machine word");
+_Static_assert(sizeof(bridge_fn) == sizeof(void *), "an export pointer is one machine word");
+
+static HANDLE g_out;                       /* stdout, taken once: with no CRT there is no stdout of its own */
+static int64_t g_session;
+static invoke_fn g_invoke;
+static last_error_fn g_last_error;
+static char g_answer[8192];                /* the host's answer buffer, static so no stack probe is needed */
+static char g_narrow[4096];
+
+/* ---- the two primitives a CRT would have given: a length and a byte copy -------------------------------------- */
+static unsigned long long text_length(const char *text)
+{
+    unsigned long long n = 0;
+    if (text != NULL) { while (text[n] != '\0') n++; }
+    return n;
+}
+
+static void copy_bytes(void *destination, const void *source, unsigned long long count)
+{
+    unsigned char *to = (unsigned char *)destination;
+    const unsigned char *from = (const unsigned char *)source;
+    while (count &gt; 0) { *to++ = *from++; count--; }
+}
+
+/* ---- output: WriteFile on the inherited handle, so a redirected stream keeps working --------------------------- */
+static void say(const char *text)
+{
+    DWORD written = 0;
+    unsigned long long n = text_length(text);
+    if (g_out == NULL || g_out == INVALID_HANDLE_VALUE || n == 0) return;
+    WriteFile(g_out, text, (DWORD)n, &amp;written, NULL);
+}
+
+static void say_uint(unsigned long value)
+{
+    char digits[21];
+    int at = 20;
+    if (value == 0) { say("0"); return; }
+    digits[at] = '\0';
+    while (value &gt; 0) { digits[--at] = (char)('0' + (int)(value % 10)); value /= 10; }
+    say(digits + at);
+}
+
+static void say_wide(const wchar_t *wide)
+{
+    int n = WideCharToMultiByte(CP_UTF8, 0, wide, -1, g_narrow, (int)sizeof(g_narrow), NULL, NULL);
+    if (n &gt; 0) say(g_narrow);
+}
+
+static void end_line(void)
+{
+    say("\r\n");
+}
+
+/* ---- loading an export by name: a representation copy, never a cast between function types -------------------- */
+static int load_export(HMODULE dll, const char *name, void *slot, unsigned long long size)
+{
+    FARPROC raw = GetProcAddress(dll, name);
+    if (raw == NULL) return 0;
+    copy_bytes(slot, &amp;raw, size);
+    return 1;
+}
+
+static const char *last_error_text(void)
+{
+    static char buffer[1024];
+    if (g_last_error == NULL) return "";
+    return g_last_error(g_session, buffer, (int)sizeof(buffer)) &gt; 0 ? buffer : "";
+}
+
+/* THE HOST HALF: one request document in, one response document out. Answer the length the document NEEDS, write at
+ * most capacity - 1 bytes plus a terminator, and a NEGATIVE answer means this host refuses the request. */
+static int32_t host_bridge(int64_t handle, void *user, const char *request, char *buffer, int32_t capacity)
+{
+    static const char response[] = "{\"v\":1,\"ok\":true,\"r\":{\"name\":\"Ada\"}}";
+    int32_t length = (int32_t)text_length(response);
+    (void)handle;
+    (void)user;
+    say("  the script asked: ");
+    if (request != NULL) say(request);
+    end_line();
+    if (buffer != NULL &amp;&amp; capacity &gt; 0) {
+        int32_t copy = length &lt; capacity - 1 ? length : capacity - 1;
+        copy_bytes(buffer, response, (unsigned long long)copy);
+        buffer[copy] = '\0';
+    }
+    return length;
+}
+
+/* One slc_invoke, the way a host does it: capacity 0 asks for the length, then a buffer of that size. */
+static int ask(const char *request)
+{
+    int needed = g_invoke(g_session, request, NULL, 0);
+    if (needed &lt; 0) {
+        say("  transport failure: ");
+        say(last_error_text());
+        end_line();
+        return -1;
+    }
+    if (needed + 1 &gt; (int)sizeof(g_answer)) {
+        say("  the answer needs ");
+        say_uint((unsigned long)needed);
+        say(" bytes");
+        end_line();
+        return -1;
+    }
+    if (g_invoke(g_session, request, g_answer, needed + 1) &lt; 0) {
+        say("  transport failure: ");
+        say(last_error_text());
+        end_line();
+        return -1;
+    }
+    return needed;
+}
+
+/* ---- the command line: with no CRT nobody hands us argv, so one token is read from GetCommandLineW ------------- */
+/* Takes the token at `at` into `into` (quoted tokens keep their spaces, and the quotes are dropped). A NULL `into`
+ * skips the token, which is how the program's own path is stepped over. Returns where the next token starts. */
+static const wchar_t *take_token(const wchar_t *at, wchar_t *into, unsigned long long capacity)
+{
+    unsigned long long n = 0;
+    while (*at == L' ' || *at == L'\t') at++;
+    if (*at == L'\0') return NULL;
+    if (*at == L'"') {
+        at++;
+        while (*at != L'\0' &amp;&amp; *at != L'"') {
+            if (into != NULL &amp;&amp; n + 1 &lt; capacity) into[n++] = *at;
+            at++;
+        }
+        if (*at == L'"') at++;
+    } else {
+        while (*at != L'\0' &amp;&amp; *at != L' ' &amp;&amp; *at != L'\t') {
+            if (into != NULL &amp;&amp; n + 1 &lt; capacity) into[n++] = *at;
+            at++;
+        }
+    }
+    if (into != NULL &amp;&amp; capacity &gt; 0) into[n &lt; capacity ? n : capacity - 1] = L'\0';
+    return at;
+}
+
+static unsigned run(void)
+{
+    static wchar_t dll_path[1024];
+    create_fn p_create;
+    free_fn p_free;
+    run_text_fn p_run_text;
+    set_bridge_fn p_set_bridge;
+    HMODULE dll;
+    int loaded;
+
+    const wchar_t *after_exe;
+
+    g_out = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    /* argv[0] is this program's own path; argv[1] is the engine's. A missing one is a usage refusal, exit 2. */
+    after_exe = take_token(GetCommandLineW(), NULL, 0);
+    if (after_exe == NULL || take_token(after_exe, dll_path, 1024) == NULL) {
+        say("usage: bridge_host.exe &lt;ScriptLangCore.dll&gt;");
+        end_line();
+        return 2;
+    }
+
+    dll = LoadLibraryW(dll_path);
+    if (dll == NULL) {
+        say("LoadLibrary(");
+        say_wide(dll_path);
+        say(") = ");
+        say_uint((unsigned long)GetLastError());
+        end_line();
+        return 2;
+    }
+
+    loaded  = load_export(dll, "slc_create", &amp;p_create, sizeof p_create);
+    loaded &amp;= load_export(dll, "slc_free", &amp;p_free, sizeof p_free);
+    loaded &amp;= load_export(dll, "slc_last_error", &amp;g_last_error, sizeof g_last_error);
+    loaded &amp;= load_export(dll, "slc_run_text", &amp;p_run_text, sizeof p_run_text);
+    loaded &amp;= load_export(dll, "slc_set_bridge", &amp;p_set_bridge, sizeof p_set_bridge);
+    loaded &amp;= load_export(dll, "slc_invoke", &amp;g_invoke, sizeof g_invoke);
+    if (!loaded) {
+        say("this engine has no bridge: ask for capability 0x200 (slc_capabilities)");
+        end_line();
+        return 2;
+    }
+
+    g_session = p_create("{\"thread\":\"own\"}");
+    if (g_session &lt;= 0) {
+        say("slc_create: ");
+        say(last_error_text());
+        end_line();
+        return 2;
+    }
+
+    /* The host half, installed once. NULL removes it. */
+    if (p_set_bridge(g_session, (void *)host_bridge, NULL) != 0) {
+        say("slc_set_bridge: ");
+        say(last_error_text());
+        end_line();
+        return 1;
+    }
+
+    /* script -&gt; host */
+    p_run_text(g_session,
+        "var who = Bridge.Call('{\"v\":1,\"id\":\"s1\",\"m\":\"customer.lookup\",\"p\":{\"id\":42}}');\n"
+        "print(\"  customer: \" + who[\"r\"][\"name\"]);", NULL);
+
+    /* host -&gt; script: the script serves a verb, then the host invokes it */
+    p_run_text(g_session,
+        "Bridge.Serve(fun (req) {\n"
+        "    var verb = \"\" + req[\"m\"];\n"
+        "    if (verb == \"echo\") { return Bridge.Ok(req[\"id\"], { n: req[\"p\"][\"n\"] * 2 }); }\n"
+        "    return Bridge.Fail(req[\"id\"], \"NoSuchVerb\", \"no \" + verb);\n"
+        "});", NULL);
+
+    if (ask("{\"v\":1,\"id\":\"h1\",\"m\":\"echo\",\"p\":{\"n\":21}}") &gt;= 0) {
+        say("  the script answered: ");
+        say(g_answer);
+        end_line();
+    }
+    if (ask("{\"v\":1,\"id\":\"h2\",\"m\":\"nope\"}") &gt;= 0) {
+        say("  an unknown verb answered: ");
+        say(g_answer);
+        end_line();
+    }
+
+    p_free(g_session);
+    FreeLibrary(dll);
+    return 0;
+}
+
+/* The entry point the build line names (-e wmainCRTStartup). With no CRT there is no main(), no argv and nobody to
+ * return to, so the verdict is ExitProcess'd here rather than returned. */
+void wmainCRTStartup(void)
+{
+    ExitProcess((UINT)run());
+}
+</code></pre>
+
+<h4>Details that decide whether it works</h4>
+<ul>
+  <li><strong>The two-pass length applies in BOTH directions.</strong> <code>slc_invoke</code> answers the length it needs for <code>capacity 0</code>, and your callback must answer the same way, because the engine probes before it allocates.</li>
+  <li><strong>A negative answer from your callback is your refusal</strong>, and the script catches it at its <code>Bridge.Call</code> with the engine's own sentence. A negative answer from <code>slc_invoke</code> is a TRANSPORT failure: read <code>slc_last_error</code>, do not parse the buffer.</li>
+  <li><strong>Ask for capability bit <code>0x200</code> (<code>slc_capabilities</code>) before relying on the two exports</strong>, and compare <code>slc_abi_revision</code> with 6. A build without the bit has no bridge and nothing else is missing.</li>
+  <li><strong>The callback runs on the engine's thread</strong> (the session owns one), so it must not take a lock the calling thread holds, and it must not call back into the same session.</li>
+  <li><strong>Your own process is x64.</strong> A 32-bit build of this sample cannot load the x64 DLL at all.</li>
+</ul>
+
+<h3 id="csharp">C#</h3>
+<p>A managed host uses the same two exports. The signatures are already written down: include the GENERATED bindings file (<code>bindings/ScriptLangCore.cs</code>, produced from <code>docs/embed/abi.json</code>) instead of retyping them, which is what the embedding harness itself does.</p>
+
+<pre><code>// bridge_host.cs: both directions over the C ABI. Build as an x64 project that includes the generated bindings:
+//   &lt;Compile Include="bindings/ScriptLangCore.cs" /&gt;
+using System.Runtime.InteropServices;
+using ScriptLangCore.Abi;
+
+if (args.Length &lt; 1) { Console.WriteLine("usage: bridge_host &lt;ScriptLangCore.dll&gt;"); return 2; }
+var lib = NativeLibrary.Load(Path.GetFullPath(args[0]));
+
+T Export&lt;T&gt;(string name) where T : Delegate
+    =&gt; Marshal.GetDelegateForFunctionPointer&lt;T&gt;(NativeLibrary.GetExport(lib, name));
+
+var create = Export&lt;CreateFn&gt;(AbiExports.Create);
+var free = Export&lt;FreeFn&gt;(AbiExports.Free);
+var capabilities = Export&lt;CapabilitiesFn&gt;(AbiExports.Capabilities);
+var runText = Export&lt;RunTextFn&gt;(AbiExports.RunText);
+var lastError = Export&lt;LastErrorFn&gt;(AbiExports.LastError);
+var setBridge = Export&lt;SetBridgeFn&gt;(AbiExports.SetBridge);
+var invoke = Export&lt;InvokeFn&gt;(AbiExports.Invoke);
+
+if ((capabilities() &amp; AbiCapabilities.Bridge) == 0) { Console.WriteLine("this build has no bridge"); return 2; }
+
+var handle = create(Utf8("{\"thread\":\"own\"}"));
+
+// THE HOST HALF. Keep the delegate in a variable that outlives every call: the engine holds this pointer, and a
+// collected callback is a crash rather than an error.
+var requests = new List&lt;string&gt;();
+BridgeCb bridgeHost = (long session, nint user, nint request, nint buffer, int capacity) =&gt;
+{
+    var text = Marshal.PtrToStringUTF8(request) ?? "";
+    requests.Add(text);
+    const string response = "{\"v\":1,\"ok\":true,\"r\":{\"name\":\"Ada\"}}";
+    var bytes = System.Text.Encoding.UTF8.GetBytes(response);
+    if (capacity &gt; 0 &amp;&amp; buffer != nint.Zero)
+    {
+        var copy = Math.Min(bytes.Length, capacity - 1);
+        Marshal.Copy(bytes, 0, buffer, copy);
+        Marshal.WriteByte(buffer, copy, 0);
+    }
+    return bytes.Length;                       // negative would be THIS host refusing
+};
+var bridgePointer = Marshal.GetFunctionPointerForDelegate(bridgeHost);
+if (setBridge(handle, bridgePointer, nint.Zero) != 0) { Console.WriteLine(Error(handle)); return 1; }
+
+// script -> host
+runText(handle, Utf8(
+    "var who = Bridge.Call('{\"v\":1,\"id\":\"s1\",\"m\":\"customer.lookup\",\"p\":{\"id\":42}}');\n" +
+    "print(\"customer: \" + who[\"r\"][\"name\"]);"), nint.Zero);
+
+// host -> script
+runText(handle, Utf8(
+    "Bridge.Serve(fun (req) {\n" +
+    "    if (req[\"m\"] == \"echo\") { return Bridge.Ok(req[\"id\"], { n: req[\"p\"][\"n\"] * 2 }); }\n" +
+    "    return Bridge.Fail(req[\"id\"], \"NoSuchVerb\", \"no \" + req[\"m\"]);\n" +
+    "});"), nint.Zero);
+
+Console.WriteLine(InvokeText("{\"v\":1,\"id\":\"h1\",\"m\":\"echo\",\"p\":{\"n\":21}}"));
+
+free(handle);
+GC.KeepAlive(bridgeHost);                       // belt and braces: the delegate outlives the session
+return 0;
+
+string InvokeText(string request)
+{
+    var requestPointer = Utf8(request);
+    try
+    {
+        var needed = invoke(handle, requestPointer, nint.Zero, 0);
+        if (needed &lt; 0) return "&lt;status " + needed + "&gt; " + Error(handle);   // TRANSPORT failure
+        var buffer = Marshal.AllocCoTaskMem(needed + 1);
+        try
+        {
+            var written = invoke(handle, requestPointer, buffer, needed + 1);
+            return written &lt; 0 ? "&lt;status " + written + "&gt; " + Error(handle)
+                              : Marshal.PtrToStringUTF8(buffer) ?? "";
+        }
+        finally { Marshal.FreeCoTaskMem(buffer); }
+    }
+    finally { Marshal.FreeCoTaskMem(requestPointer); }
+}
+
+string Error(long session)
+{
+    var needed = lastError(session, nint.Zero, 0);
+    if (needed &lt;= 0) return "";
+    var buffer = Marshal.AllocCoTaskMem(needed + 1);
+    try { lastError(session, buffer, needed + 1); return Marshal.PtrToStringUTF8(buffer) ?? ""; }
+    finally { Marshal.FreeCoTaskMem(buffer); }
+}
+
+nint Utf8(string text)
+{
+    var bytes = System.Text.Encoding.UTF8.GetBytes(text + "\0");
+    var memory = Marshal.AllocCoTaskMem(bytes.Length);
+    Marshal.Copy(bytes, 0, memory, bytes.Length);
+    return memory;
+}
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate int BridgeCb(long handle, nint user, nint request, nint buffer, int capacity);</code></pre>
+
+<h4>Details that decide whether it works</h4>
+<ul>
+  <li><strong><code>CallingConvention.Cdecl</code></strong> on the delegate, which is the ABI's convention. The default (Winapi, stdcall) corrupts the stack on x64 rather than failing a lookup.</li>
+  <li><strong>Keep the delegate alive.</strong> A local that goes out of scope, or a lambda passed inline, can be collected while the engine still calls its pointer. A field, or a local that the last call can still see, is the fix.</li>
+  <li><strong>The two-pass length, both directions.</strong> Marshal the answer with <code>PtrToStringUTF8</code> rather than <code>PtrToStringAuto</code>, which reads UTF-16 on this platform.</li>
+  <li><strong>A host that owns the interpreter directly</strong> (the engine's own embedding, and any host that drives a session in-process) sets <code>HostBridge</code> instead, a <code>Func&lt;string, string?&gt;</code>. It is the same field <code>slc_set_bridge</code> writes, so there is one implementation of the rule; an out-of-process or separate-assembly host uses the ABI.</li>
+</ul>
+
+<h3 id="python">Python</h3>
+<p><code>ctypes</code> is in the standard library, so this carrier needs nothing installed. The declarations are also generated: <code>bindings/scriptlangcore.py</code> holds the signatures and the capability names. The sample below is shipped as <code>bindings/BridgeTest.py</code>, so it can be run rather than retyped: it checks both directions and every refusal in this section's list, and it ends with <code>PYTHON BRIDGE OK</code>, which is its exit code.</p>
+
+<pre><code>"""bridge_host.py: both directions over the C ABI, with the standard library only.
+    python bridge_host.py C:\\Program Files\\ScriptLangCore\\bin\\ScriptLangCore.dll
+"""
+import ctypes
+import sys
+
+engine = ctypes.WinDLL(sys.argv[1])          # x64 CPython, because the library is x64
+
+engine.slc_create.restype = ctypes.c_longlong
+engine.slc_create.argtypes = [ctypes.c_char_p]
+engine.slc_free.restype = ctypes.c_int
+engine.slc_free.argtypes = [ctypes.c_longlong]
+engine.slc_capabilities.restype = ctypes.c_int
+engine.slc_capabilities.argtypes = []
+engine.slc_last_error.restype = ctypes.c_int
+engine.slc_last_error.argtypes = [ctypes.c_longlong, ctypes.c_char_p, ctypes.c_int]
+engine.slc_set_output.restype = ctypes.c_int
+engine.slc_set_output.argtypes = [ctypes.c_longlong, ctypes.c_void_p, ctypes.c_void_p]
+engine.slc_run_text.restype = ctypes.c_int
+engine.slc_run_text.argtypes = [ctypes.c_longlong, ctypes.c_char_p, ctypes.c_char_p]
+engine.slc_set_bridge.restype = ctypes.c_int
+engine.slc_set_bridge.argtypes = [ctypes.c_longlong, ctypes.c_void_p, ctypes.c_void_p]
+engine.slc_invoke.restype = ctypes.c_int
+engine.slc_invoke.argtypes = [ctypes.c_longlong, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+
+CAP_BRIDGE = 1 &lt;&lt; 9
+if (engine.slc_capabilities() &amp; CAP_BRIDGE) == 0:
+    raise SystemExit("this build has no bridge")
+
+LINE_CB = ctypes.CFUNCTYPE(None, ctypes.c_longlong, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
+# THE BUFFER IS c_void_p, NOT c_char_p. A c_char_p parameter arrives as an immutable Python bytes object, so a
+# write into it is lost and this host would answer a length for a document it never wrote.
+BRIDGE_CB = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_longlong, ctypes.c_void_p,
+                             ctypes.c_char_p, ctypes.c_void_p, ctypes.c_int)
+
+lines = []
+requests = []
+
+def on_line(handle, channel, utf8, user):
+    lines.append(str(channel) + "|" + (utf8 or b"").decode("utf-8"))
+
+def on_request(handle, user, request, buffer, capacity):
+    """The host half: the length the response needs, at most capacity - 1 bytes plus a terminator."""
+    requests.append((request or b"").decode("utf-8"))
+    response = b'{"v":1,"ok":true,"r":{"name":"Ada"}}'
+    if capacity &gt; 0 and buffer:
+        count = min(len(response), capacity - 1)
+        ctypes.memmove(buffer, response, count)
+        ctypes.memset(buffer + count, 0, 1)
+    return len(response)                      # a negative return would be THIS host refusing
+
+sink = LINE_CB(on_line)                      # keep BOTH callback objects alive: ctypes frees them with the object
+bridge = BRIDGE_CB(on_request)
+
+handle = engine.slc_create(b'{"thread":"own"}')
+
+def last_error():
+    needed = engine.slc_last_error(handle, None, 0)
+    if needed &lt;= 0:
+        return ""
+    buffer = ctypes.create_string_buffer(needed + 1)
+    engine.slc_last_error(handle, buffer, needed + 1)
+    return buffer.value.decode("utf-8")
+
+engine.slc_set_output(handle, ctypes.cast(sink, ctypes.c_void_p), None)
+if engine.slc_set_bridge(handle, ctypes.cast(bridge, ctypes.c_void_p), None) != 0:
+    raise SystemExit(last_error())
+
+# script -> host
+engine.slc_run_text(handle,
+    b'var who = Bridge.Call(\'{"v":1,"id":"s1","m":"customer.lookup","p":{"id":42}}\');\n'
+    b'print("customer: " + who["r"]["name"]);', None)
+
+# host -> script
+engine.slc_run_text(handle,
+    b'Bridge.Serve(fun (req) {\n'
+    b'    if (req["m"] == "echo") { return Bridge.Ok(req["id"], { n: req["p"]["n"] * 2 }); }\n'
+    b'    return Bridge.Fail(req["id"], "NoSuchVerb", "no " + req["m"]);\n'
+    b'});', None)
+
+def ask(document):
+    data = document.encode("utf-8")
+    needed = engine.slc_invoke(handle, data, None, 0)
+    if needed &lt; 0:
+        return "&lt;status {}&gt; {}".format(needed, last_error())
+    buffer = ctypes.create_string_buffer(needed + 1)
+    if engine.slc_invoke(handle, data, buffer, needed + 1) &lt; 0:
+        return "&lt;status {}&gt; {}".format(needed, last_error())
+    return buffer.value.decode("utf-8")
+
+print(ask('{"v":1,"id":"h1","m":"echo","p":{"n":21}}'))
+print(ask('{"v":1,"id":"h2","m":"nope"}'))
+engine.slc_free(handle)</code></pre>
+
+<h4>Details that decide whether it works</h4>
+<ul>
+  <li><strong>The buffer parameter is <code>c_void_p</code>.</strong> With <code>c_char_p</code> the parameter is an immutable <code>bytes</code>, so the host writes nothing and still answers a length: the engine then parses a document that does not exist. Write with <code>ctypes.memmove</code> and terminate with <code>memset</code>.</li>
+  <li><strong>Keep the callback objects alive.</strong> A <code>CFUNCTYPE</code> object owns the native thunk; if Python collects it, the engine calls freed memory. A module-level or function-local that outlives the session is enough.</li>
+  <li><strong><code>ctypes.WinDLL</code></strong>, not <code>CDLL</code>, and an x64 interpreter.</li>
+  <li><strong>Give the handler a request that HAS an <code>id</code></strong> when the handler echoes it. An absent <code>id</code> is legal (rule 6), and a handler that reads <code>req["id"]</code> unconditionally refuses the request, which is a fact about the handler rather than about the call.</li>
+  <li><strong>Read <code>slc_last_error</code> only on a negative status.</strong> A contract failure is a document with <code>ok:false</code>.</li>
+</ul>
+
+<h3 id="powershell">PowerShell</h3>
+<p><code>Add-Type</code> compiles the declarations and the callbacks in one step, which is PowerShell's native door to a C ABI: a script block cannot be a callback, and the reason is a real limitation rather than a style choice (see below).</p>
+
+<pre><code># bridge_host.ps1, run with: pwsh -File bridge_host.ps1 -EngineDll "C:\Program Files\ScriptLangCore\bin\ScriptLangCore.dll"
+param([Parameter(Mandatory = $true)][string] $EngineDll)
+$ErrorActionPreference = 'Stop'
+
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class Engine
+{
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void LineCb(long handle, int channel, IntPtr utf8, IntPtr user);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate int BridgeCb(long handle, IntPtr user, IntPtr request, IntPtr buffer, int capacity);
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr LoadLibraryW(string path);
+
+    [DllImport("kernel32", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true)]
+    public static extern IntPtr GetProcAddress(IntPtr module, string name);
+
+    public delegate long CreateFn(IntPtr options);
+    public delegate int FreeFn(long handle);
+    public delegate int CapabilitiesFn();
+    public delegate int LastErrorFn(long handle, IntPtr buffer, int capacity);
+    public delegate int RunTextFn(long handle, IntPtr source, IntPtr name);
+    public delegate int SetBridgeFn(long handle, IntPtr callback, IntPtr user);
+    public delegate int InvokeFn(long handle, IntPtr request, IntPtr buffer, int capacity);
+
+    // THE CALLBACKS RUN ON THE ENGINE'S THREAD, so they hand their answers over through static state.
+    public static readonly List&lt;string&gt; Lines = new List&lt;string&gt;();
+    public static readonly List&lt;string&gt; Requests = new List&lt;string&gt;();
+
+    // KEPT ALIVE FOR THE SESSION'S LIFETIME: the engine holds these pointers.
+    public static readonly LineCb LineHandler = OnLine;
+    public static readonly BridgeCb BridgeHandler = OnBridge;
+
+    private static void OnLine(long handle, int channel, IntPtr utf8, IntPtr user)
+        =&gt; Lines.Add(channel.ToString() + "|" + Read(utf8));
+
+    private static int OnBridge(long handle, IntPtr user, IntPtr request, IntPtr buffer, int capacity)
+    {
+        Requests.Add(Read(request));
+        var response = "{\"v\":1,\"ok\":true,\"r\":{\"name\":\"Ada\"}}";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(response);
+        if (capacity &gt; 0 &amp;&amp; buffer != IntPtr.Zero)
+        {
+            var count = Math.Min(bytes.Length, capacity - 1);
+            Marshal.Copy(bytes, 0, buffer, count);
+            Marshal.WriteByte(buffer, count, 0);
+        }
+        return bytes.Length;
+    }
+
+    public static T Export&lt;T&gt;(IntPtr module, string name) where T : Delegate
+        =&gt; Marshal.GetDelegateForFunctionPointer&lt;T&gt;(GetProcAddress(module, name));
+
+    public static IntPtr Utf8(string text)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(text + "\0");
+        var memory = Marshal.AllocCoTaskMem(bytes.Length);
+        Marshal.Copy(bytes, 0, memory, bytes.Length);
+        return memory;
+    }
+
+    public static string Read(IntPtr memory) =&gt; memory == IntPtr.Zero ? "" : Marshal.PtrToStringUTF8(memory) ?? "";
+}
+'@
+
+$module = [Engine]::LoadLibraryW((Resolve-Path -LiteralPath $EngineDll).Path)
+$capabilities = [Engine]::Export[Engine+CapabilitiesFn]($module, 'slc_capabilities')
+if (($capabilities.Invoke() -band (1 -shl 9)) -eq 0) { throw 'this build has no bridge' }
+
+$create     = [Engine]::Export[Engine+CreateFn]($module, 'slc_create')
+$free       = [Engine]::Export[Engine+FreeFn]($module, 'slc_free')
+$lastError  = [Engine]::Export[Engine+LastErrorFn]($module, 'slc_last_error')
+$setOutput  = [Engine]::Export[Engine+SetOutputFn]($module, 'slc_set_output')
+$runText    = [Engine]::Export[Engine+RunTextFn]($module, 'slc_run_text')
+$setBridge  = [Engine]::Export[Engine+SetBridgeFn]($module, 'slc_set_bridge')
+$invoke     = [Engine]::Export[Engine+InvokeFn]($module, 'slc_invoke')
+
+$options = [Engine]::Utf8('{"thread":"own"}')
+try { $session = $create.Invoke($options) } finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($options) }
+
+$null = $setOutput.Invoke($session, [Runtime.InteropServices.Marshal]::GetFunctionPointerForDelegate([Engine]::LineHandler), [IntPtr]::Zero)
+$null = $setBridge.Invoke($session, [Runtime.InteropServices.Marshal]::GetFunctionPointerForDelegate([Engine]::BridgeHandler), [IntPtr]::Zero)
+
+# script -> host
+$text = [Engine]::Utf8("var who = Bridge.Call('{`"v`":1,`"id`":`"s1`",`"m`":`"customer.lookup`",`"p`":{`"id`":42}}');`nprint(`"customer: `" + who[`"r`"][`"name`"]);")
+try { $null = $runText.Invoke($session, $text, [IntPtr]::Zero) } finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($text) }
+
+# host -> script
+$text = [Engine]::Utf8("Bridge.Serve(fun (req) {`n    if (req[`"m`"] == `"echo`") { return Bridge.Ok(req[`"id`"], { n: req[`"p`"][`"n`"] * 2 }); }`n    return Bridge.Fail(req[`"id`"], `"NoSuchVerb`", `"no `" + req[`"m`"]);`n});")
+try { $null = $runText.Invoke($session, $text, [IntPtr]::Zero) } finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($text) }
+
+function Ask([string] $document) {
+    $request = [Engine]::Utf8($document)
+    try {
+        $needed = $invoke.Invoke($session, $request, [IntPtr]::Zero, 0)
+        if ($needed -lt 0) { return "&lt;status $needed&gt; " + (Get-LastError) }
+        $buffer = [Runtime.InteropServices.Marshal]::AllocCoTaskMem($needed + 1)
+        try {
+            if ($invoke.Invoke($session, $request, $buffer, $needed + 1) -lt 0) { return "&lt;status&gt; " + (Get-LastError) }
+            return [Engine]::Read($buffer)
+        } finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($buffer) }
+    } finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($request) }
+}
+
+function Get-LastError {
+    $needed = $lastError.Invoke($session, [IntPtr]::Zero, 0)
+    if ($needed -le 0) { return '' }
+    $buffer = [Runtime.InteropServices.Marshal]::AllocCoTaskMem($needed + 1)
+    try { $null = $lastError.Invoke($session, $buffer, $needed + 1); return [Engine]::Read($buffer) }
+    finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($buffer) }
+}
+
+Write-Output (Ask '{"v":1,"id":"h1","m":"echo","p":{"n":21}}')
+Write-Output (Ask '{"v":1,"id":"h2","m":"nope"}')
+$null = $free.Invoke($session)</code></pre>
+
+<h4>Details that decide whether it works</h4>
+<ul>
+  <li><strong>A PowerShell SCRIPT BLOCK cannot be a callback.</strong> The engine calls a callback on the thread that owns the interpreter, and a script block needs a runspace bound to that thread, so a script-block callback dies with <code>PSInvalidOperationException</code> from <code>GetContextFromTLS</code> and takes the process with it. Compile the callbacks with <code>Add-Type</code> and hold the delegates in fields.</li>
+  <li><strong>A property read through the PSObject adapter is not the server's path.</strong> Measured on this box: <code>$engine.Version</code> answers EMPTY, because PowerShell asks <code>GetProperties()</code> first, and the same happens with <code>Scripting.FileSystemObject</code>, which does carry a type library, so the adapter is the cause rather than the server. The reading that reaches IDispatch is <code>InvokeMember</code>:
+<pre><code>$version = $engine.GetType().InvokeMember('Version',
+    [System.Reflection.BindingFlags]::GetProperty, $null, $engine, $null)</code></pre>
+  <strong>Methods are unaffected</strong>: <code>$engine.Invoke($document)</code>, <code>$engine.RunText($source)</code> and the rest work directly.</li>
+  <li><strong><code>Add-Type</code> compiles once per session</strong>, so the whole file runs as one script rather than a snippet at a time, or the second load answers "type already exists".</li>
+  <li><strong>Windows PowerShell 5.1 has no <code>NativeLibrary</code></strong>, which is why this sample goes through <code>LoadLibraryW</code> + <code>GetProcAddress</code> with <code>Add-Type</code>, not through a .NET API.</li>
+</ul>
+
+<h3 id="com">COM</h3>
+<p>A COM client needs no declarations, no buffer and no handle: one ProgID, one member. <code>CreateObject("ScriptLangCore.Session")</code> loads this same <code>ScriptLangCore.dll</code> (the Embed configuration) into the client's own process, and since the server publishes no type library every call arrives as IDispatch: the member's name resolves to a DISPID, then one <code>Invoke</code> runs it, <code>RunText</code> being DISPID 2 and <code>Invoke</code> DISPID 8. The object holds ONE session, created on its first use on a thread the engine starts, and every member is a single job marshalled onto that thread. That is what ties the two verbs together: <code>RunText</code> runs a script in the session's interpreter, so the <code>Bridge.Serve</code> handler it installs is still there when <code>Invoke</code> posts one request document to the same interpreter, where the engine's dispatcher checks the envelope, calls the handler and rebuilds the answer with the caller's <code>id</code> echoed, so what returns is a document rather than whatever the handler happened to write. <a href="#com-workflow">How one call travels</a> is that path step by step, with the eight members and the three kinds of failure.</p>
+
+<pre><code># PowerShell as a COM client: nothing to install in this process.
+$engine = New-Object -ComObject ScriptLangCore.Session
+$null = $engine.RunText(@'
+Bridge.Serve(fun (req) {
+    var verb = "" + req["m"];
+    if (verb == "echo") { return Bridge.Ok(req["id"], { n: req["p"]["n"] * 2 }); }
+    if (verb == "boom") { throw "com boom"; }
+    return Bridge.Fail(req["id"], "NoSuchVerb", "no " + verb);
+});
+'@)
+
+$echo = $engine.Invoke('{"v":1,"id":"p1","m":"echo","p":{"n":21}}')
+# {"v":1,"id":"p1","ok":true,"r":{"n":42}}
+
+$unknown = $engine.Invoke('{"v":1,"id":"p2","m":"nope"}')
+# {"v":1,"id":"p2","ok":false,"e":{"code":"NoSuchVerb",...}}
+
+$engine.Free()</code></pre>
+
+<pre><code>Option Explicit
+' VBA: the same door through late binding. The module assets\language\stdcall\ComEngine.bas wraps these members.
+' The handler answers a CLASS INSTANCE, so the response carries its PUBLIC FIELDS; VBA has no JSON
+' parser, so one local reader pulls a top-level field out of the document.
+Private Function Field(ByVal document As String, ByVal name As String) As String
+    Dim at As Long, piece As String, cut As Long
+    at = InStr(1, document, """" & name & """:")
+    If at = 0 Then Exit Function
+    piece = Mid$(document, at + Len(name) + 3)
+    cut = InStr(1, piece, ",")
+    If cut = 0 Then cut = InStr(1, piece, "}")
+    piece = Left$(piece, cut - 1)
+    If Left$(piece, 1) = """" Then piece = Mid$(piece, 2, Len(piece) - 2)
+    Field = piece
+End Function
+
+Sub ComBridgeDemo()
+    Dim engine As Object, verdict As String, answer As String, code As Long
+    Set engine = CreateObject("ScriptLangCore.Session")
+
+    ' One class the session declares, and one verb that shows a YES/NO box and answers an instance of it.
+    verdict = engine.RunText( _
+        "class Reply { public string Id; public string Name; public int Code; }" & vbLf & _
+        "Bridge.Serve(fun (req) {" & vbLf & _
+        "    var code = MessageBox(""Proceed with the export?"", ""ScriptLangCore"", 4);" & vbLf & _
+        "    var reply = new Reply();" & vbLf & _
+        "    reply.Id = ""req-"" + req[""id""];" & vbLf & _
+        "    reply.Name = ""factice"";" & vbLf & _
+        "    reply.Code = code;" & vbLf & _
+        "    return Bridge.Ok(req[""id""], reply);" & vbLf & _
+        "});")
+
+    ' RunText never raises: a snippet that did not parse leaves nothing served, and the Invoke below
+    ' would answer NoHandler, which names the wrong thing.
+    If InStr(verdict, """Ok"":true") = 0 Then
+        MsgBox verdict
+        Exit Sub
+    End If
+
+    ' The box appears in THIS process, because the server is in-process, and the call waits until it
+    ' is answered: nothing here repaints while it is up.
+    answer = engine.Invoke("{""v"":1,""id"":""v1"",""m"":""confirm""}")
+    ' {"v":1,"id":"v1","ok":true,"r":{"Id":"req-v1","Name":"factice","Code":6}}
+
+    code = CLng(Field(answer, "Code"))     ' the button's own id: 6 for Yes, 7 for No, 1 for OK
+    MsgBox Field(answer, "Id") & " / " & Field(answer, "Name") & " / " & code
+    Set engine = Nothing
+End Sub</code></pre>
+
+<p>That is the whole round trip, and three things in it decide whether the answer is usable. The handler answers a CLASS INSTANCE, so the response's <code>r</code> is a document of its PUBLIC FIELDS (<code>Id</code>, <code>Name</code>, <code>Code</code>) and nothing else: a field is data, while a method or a computed member is behaviour and does not travel. The box belongs to the client, because the server runs in the client's own process, so the dialog appears on the client's screen while the client's thread waits inside <code>Invoke</code>. And <code>Code</code> is Win32's own button id (6 for Yes, 7 for No, 1 for OK), so the script branches on it and the client reads what the script decided rather than re-deriving anything.</p>
+
+<h4 id="com-workflow">How one call travels</h4>
+<p>Every step below is the same code the C ABI drives, reached through IDispatch instead of an export, so a COM client and a C host cannot disagree about what a document means.</p>
+<ol>
+  <li><strong>The object is late-bound, and that decides what a client may write.</strong> <code>CreateObject</code> resolves the ProgID to the CLSID above, loads <code>ScriptLangCore.dll</code> in-process and asks its <code>DllGetClassObject</code> for a class factory, which answers an <code>IDispatch</code> and nothing else. There is no type library, so VBA declares the variable <code>As Object</code>, <code>GetTypeInfoCount</code> answers 0, and each call resolves its member name with <code>GetIDsOfNames</code> (case-insensitively) and arrives as one <code>Invoke</code> carrying a DISPID.</li>
+  <li><strong>The object is one session, created on first use, on a thread the engine starts.</strong> <code>CreateObject</code> only makes the object; the first member creates the session with <code>{"thread":"own"}</code>, which is an STA thread with 32 MB of stack. That is not a detail: a caller's own thread (Excel's is 1 MB) would trip the engine's depth guard, so the work runs where the interpreter lives. Two objects are two sessions, and each keeps its own handler.</li>
+  <li><strong>Every member is one marshalled job.</strong> The calling thread posts the work to the session's thread and waits for it. A disposed session, a call from a thread that does not own it, and a second call while one is in flight are each refused by name. The host object a script may reach through <code>Com.Host()</code> is registered for that one run and released after it, which is what lets the host application quit.</li>
+  <li><strong><code>RunText</code> is a real run of the session's interpreter.</strong> Lex, parse, precompile the declarations, interpret: what a snippet declares, and what it serves, stays in that session. The answer is the run's verdict (status, <code>Ok</code>, code, message, line, column, result), or what the snippet printed when it printed anything. A failing snippet is a verdict, never an exception.</li>
+  <li><strong><code>Bridge.Serve</code> stores the handler on the running interpreter</strong>, together with the file it came from, which becomes the <code>at.file</code> of a failure the engine reports later. <code>Bridge.Serve(null)</code> removes it, <code>Bridge.Served</code> answers whether one is installed, and a session that never served answers <code>NoHandler</code>.</li>
+  <li><strong><code>Invoke</code> posts the document to that same interpreter, and the dispatcher decides the contract in a fixed order.</strong> Text that is not a JSON object is <code>BadRequest</code>; a <code>v</code> that is not this build's contract version is <code>UnsupportedVersion</code>; a missing or empty <code>m</code> is <code>MissingMethod</code>; a <code>p</code> that is present and is not an object is <code>BadParams</code>; no handler is <code>NoHandler</code>. Then the handler is called with the request as a script dictionary, so <code>req["m"]</code> and <code>req["p"]</code> are the caller's own values, and a handler that throws answers its own error object, with the position and the frames the engine caught.</li>
+  <li><strong>The answer is rebuilt rather than forwarded.</strong> A handler answers the text <code>Bridge.Ok</code> or <code>Bridge.Fail</code> builds; an answer that is not text is <code>HandlerReturnedNothing</code>, and one that is not an envelope with a boolean <code>ok</code> is <code>HandlerReturnedNonEnvelope</code>. The dispatcher then forces <code>v</code> to the contract version, echoes <code>id</code> from the REQUEST (and removes it when the request carried none), and supplies a default <code>e</code> for a failure that forgot its reason. A client therefore correlates on the id it sent, whatever the handler wrote.</li>
+  <li><strong>It comes back as a <code>BSTR</code> with HRESULT 0, and the document is the whole answer.</strong> <code>Invoke</code> does not write <code>LastResult</code>, because the document IS the answer. <code>Free()</code>, or releasing the last reference, ends the session on its own thread, and the handler goes with the interpreter.</li>
+</ol>
+<table>
+  <tr><th style="width:30%;">Member</th><th style="width:9%;">DISPID</th><th>What it does</th></tr>
+  <tr><td><code>Version</code></td><td>1</td><td>the engine's version line, which carries the runtime and the ABI revision a client can compare</td></tr>
+  <tr><td><code>RunText(source [, name])</code></td><td>2</td><td>runs a snippet in the session: what it printed, else its verdict JSON</td></tr>
+  <tr><td><code>RunFile(path)</code></td><td>3</td><td>the same for a file on disk, run in the same session</td></tr>
+  <tr><td><code>LastResult</code></td><td>4</td><td>the last run's verdict JSON</td></tr>
+  <tr><td><code>LastError</code></td><td>5</td><td>the last transport sentence, and empty after a call that worked</td></tr>
+  <tr><td><code>Eval(name, args...)</code></td><td>6</td><td>calls a function the session already holds, answering its value as text</td></tr>
+  <tr><td><code>Free()</code></td><td>7</td><td>ends the session now; a later member says so instead of crashing</td></tr>
+  <tr><td><code>Invoke(requestDocument)</code></td><td>8</td><td>the Bridge document in, the Bridge document out</td></tr>
+</table>
+<p><strong>Three kinds of failure, and a client can tell them apart.</strong></p>
+<table>
+  <tr><th style="width:34%;">What failed</th><th>What the caller gets</th></tr>
+  <tr><td>the contract: a malformed request, another version, no verb, no handler, a handler that threw or answered the wrong shape</td><td>a document with <code>ok:false</code> and HRESULT 0, so nothing has to catch anything</td></tr>
+  <tr><td>the transport: a freed object, a session already running, a call from the wrong thread, a call from inside the session's own run</td><td>the sentence, both as the member's answer and in <code>LastError</code></td></tr>
+  <tr><td>the snippet itself: a parse error, a runtime error, <code>exit</code></td><td>a verdict from <code>RunText</code>: status, <code>Ok</code>, <code>Code</code>, <code>Message</code>, <code>Line</code>, <code>Column</code></td></tr>
+</table>
+<p>Only the first kind travels inside a document. A transport sentence and a snippet's verdict never do, so a client that parses <code>Invoke</code>'s answer as JSON can rely on it being a document, and one that wants to know why a run failed reads the verdict <code>RunText</code> answered or <code>LastResult</code> afterwards.</p>
+
+<h4>Details that decide whether it works</h4>
+<ul>
+  <li><strong>One direction only, and that is the contract rather than an omission.</strong> COM carries the host to script direction: the client calls <code>Invoke</code> and the script answers. A script that must CALL BACK needs the host half, which no COM member installs; use the C ABI (<code>slc_set_bridge</code>) for that, or reach the application through <code>Com.Host()</code> when the engine is hosted inside it.</li>
+  <li><strong>The document IS the answer.</strong> A contract failure is the answer's own <code>ok:false</code> with HRESULT 0, and a transport failure (a freed object, a session already running) is the sentence in <code>LastError</code>, because a member has no status to answer. <code>Invoke</code> deliberately does NOT write <code>LastResult</code>.</li>
+  <li><strong>A snippet is a SCRIPT, and <code>RunText</code> answers a verdict instead of raising.</strong> Every statement ends with its <code>;</code>, so a <code>Bridge.Serve(...)</code> text missing it answers a <code>ParseError</code> and serves nothing, and the <code>Invoke</code> that follows says <code>NoHandler</code>, which names the wrong thing. On the sample above, removing the <code>;</code> after <code>});</code> answers <code>Expect ';' after expression. (expected 'Semicolon', found 'Eof')</code> at line 9 column 3, <code>Bridge.Served</code> is false, and the <code>Invoke</code> that follows answers <code>NoHandler</code> instead of the class instance. Read the verdict while building a handler, and check <code>Bridge.Served</code> in a snippet of its own when in doubt.</li>
+  <li><strong>Register the server first</strong>: the installer writes the ProgID <code>ScriptLangCore.Session</code>, the CLSID <code>{4A9D69C4-D9E6-4914-B7DF-ABC442BF5096}</code> and <code>InprocServer32</code> with <code>ThreadingModel=Apartment</code>. Without installing, <code>setup/com-register.reg</code> does the same for the current user.</li>
+  <li><strong>Late binding and x64 only.</strong> There is no type library, so VBA sees <code>Object</code>; a 32-bit Office cannot load the x64 server, and Windows answers "class not registered".</li>
+  <li><strong>A call holds the caller's thread</strong> until the script returns, because a session runs on its own STA thread and the COM call waits for it. A handler that shows a modal box therefore holds its client until the box is answered, which is what the VBA sample above does. The engine's own typed route for VBA is the C ABI in <code>assets\language\stdcall\StdCall.bas</code>, which is what a 64-bit Office should use when it needs more than one member.</li>
+</ul>
+
+<h2 id="depth">No re-entry, and threads</h2>
+<p>The contract refuses <strong>re-entry on the same session</strong>: a session serves one host request at a time. A handler MAY call the host with <code>Bridge.Call</code>, which is how it asks the host a question while serving.</p>
+<ul>
+  <li><strong>A handler that calls <code>Bridge.Handle</code> on its own session</strong> is refused by name: it would be a loop. <code>Bridge.Call</code> is NOT refused by this rule; it is the script-to-host door.</li>
+  <li><strong>A verb issued from inside a host callback</strong> is refused, and the refusal comes back as a negative status from that nested <code>slc_invoke</code>. A run posted there would wait on itself.</li>
+  <li><strong>A host that answers <code>Bridge.Call</code> by calling back into the same session</strong> is refused the same way. A host that needs to ask a question while answering one posts it to another thread. So the legal call graph is host to <code>Handle</code>, handler to <code>Call</code>, host, with one answer per request.</li>
+  <li><strong>One call at a time per handle.</strong> A run is marshalled to the thread that owns the interpreter and the host waits for it, so a second verb arriving meanwhile is refused by name rather than queued. The one exception is <code>slc_cancel</code>, a signal from any thread by design.</li>
+  <li><strong>The host callback runs on the engine's thread</strong>, which owns the interpreter. It must not block on the thread that is waiting for the engine, and it must not take a lock that thread holds.</li>
+</ul>
+
+<h2 id="wire">What travels, and what stays home</h2>
+<ul>
+  <li><strong>Values travel as JSON</strong>: numbers (with their script type), strings, booleans, null, arrays and objects. A script dictionary, a list, a struct and a script class instance cross as the object or array a reader expects, so a host reads a document rather than a type table.</li>
+  <li><strong>A live object travels as a REFERENCE the owning side resolves</strong>, for example <code>"acc:17"</code>. Lifetime belongs to the owner, and a dangling reference is a <code>code</code> in the error object rather than a freed pointer. That is what makes one contract work for a Python or C host at all.</li>
+  <li><strong>Page inside <code>p</code>, with a reserved key.</strong> A contract that allows one huge value invites a payload no reader can bound, so a host asks for a page as <code>{ "$page": { "cursor": ..., "size": ... } }</code> (or a list of ids) and the script answers a chunk; the next cursor travels as <code>r.$next</code>, and the last page says <code>r.$done: true</code> instead. The <code>$</code> keys are the contract's, not the application's, so one generic client can page a verb that opts in without knowing its domain, and a verb that does not read <code>$page</code> simply sees an ordinary member it may ignore.</li>
+  <li><strong>Retrying a request is the application's contract.</strong> <code>retry: true</code> invites the host to send the same request again, so the handler owns making that safe: <code>id</code> is the correlation handle and the natural idempotency key, and the dispatcher does not dedupe. A verb that cannot be retried answers <code>retry: false</code> (the default) with a code the host can act on; when the handler knows the delay, it also sets <code>retryAfter</code>.</li>
+  <li><strong>Pipelining is not available on any carrier today.</strong> <code>id</code> exists so an answer can be matched to its request in a log; a carrier marshals one call at a time (see <a href="#depth">No re-entry, and threads</a>), so a host sends its requests in sequence, or a future batch, which version 1 does not define.</li>
+  <li><strong>Add verbs, never re-mean them.</strong> A new <code>m</code> needs no version change; removing one, or changing its parameters, does. A reader tolerates members it does not know.</li>
+  <li><strong>Nothing about the host leaks into the script.</strong> A COM client, a Python process and a C launcher all answer the same document for the same verb, which is the property the five probes below check identically.</li>
+</ul>
+
+<h2 id="checking">Checking a carrier</h2>
+<p>Every one of the five carriers was driven through the SAME ten checks, so a difference between them is a difference in the carrier and not in what was asked of it:</p>
+<ol>
+  <li>the capability bit <code>0x200</code> says this build has the bridge, and <code>slc_abi_revision</code> is at least 6;</li>
+  <li>a session is created;</li>
+  <li>the host callback is installed;</li>
+  <li><code>Bridge.Call</code> reaches the host and answers its document;</li>
+  <li>the host callback received the request document, verb and all;</li>
+  <li>a script serves a verb, and <code>slc_invoke</code> (or <code>Invoke</code>) doubles 21 and echoes the id;</li>
+  <li>an unknown verb is a CONTRACT failure inside the document;</li>
+  <li>a request that is not JSON, or names another version, is a contract answer rather than a transport failure;</li>
+  <li>the host half can be removed (<code>slc_set_bridge(NULL)</code>), and then <code>Bridge.Call</code> says so by name;</li>
+  <li>the session frees, and a freed object or handle says so instead of crashing.</li>
+</ol>
+<p>The in-tree instruments are these:</p>
+<table>
+  <tr><th style="width:42%;">Instrument</th><th>What it proves</th></tr>
+  <tr><td><code>src/embed/Program.cs</code> (the embedding harness)</td><td>The C ABI over a REAL function pointer: both directions, the two-pass length, a re-entrant verb refused, a negative answer as a refusal, and the COM server's <code>Invoke</code> over IDispatch.</td></tr>
+  <tr><td><code>assets/language/repl/interop/bridge_contract_test.slc</code></td><td>The contract itself, with a stub host that is just a script: the envelope, the version, the verb, the parameters object including an explicit null, the handler's own failure, a non-envelope answer, the answer's whole shape (exactly one of <code>r</code> or <code>e</code>, and the error's members), a handler calling the host while serving, and the id echoed four ways. Runs on both engines.</td></tr>
+  <tr><td><code>bindings/BridgeTest.py</code></td><td>The Python carrier, shipped: the host half and the script half in one run, plus every refusal, and <code>PYTHON BRIDGE OK</code> as the answer a driver asserts.</td></tr>
+  <tr><td><code>assets/language/com/VbaBench.bas</code>, <code>VbaBench.xlsm</code></td><td>The VBA carrier as a workbook: <code>RunBridgeSelfTest</code> drives <code>Invoke</code> in nine named checks and returns <code>BRIDGE OK</code>; <code>bindings/vba-bench-check.ps1</code> rebuilds the workbook from the module and asserts both the verdict and that the text it carries is that file, line for line.</td></tr>
+  <tr><td><code>src/build/embed-check.sh</code></td><td>The published DLL end to end, including the COM registration chain and the process-level legs.</td></tr>
+  <tr><td><code>src/build/check-abi-manifest.sh</code></td><td><code>docs/embed/abi.json</code>, the exports marked <code>[UnmanagedCallersOnly]</code>, the capability bits and the generated bindings agree.</td></tr>
+  <tr><td><code>src/build/check-doc-bridge-c.sh</code></td><td>The C block on THIS page is <code>bindings/bridge_host.c</code> verbatim, so the sample a reader copies and the file a host compiles cannot drift apart.</td></tr>
+</table>
+<pre><code>bash src/build/embed-check.sh                       <span style="color:var(--text-dim);"># HARNESS OK, and the process legs</span>
+bash src/build/run-repl-tests.sh --filter bridge_contract_test --build aot
+bash src/build/check-abi-manifest.sh
+bash src/build/check-doc-bridge-c.sh</code></pre>
+
+<h2 id="trouble">Troubleshooting</h2>
+<table>
+  <tr><th style="width:40%;">Symptom</th><th>Cause and fix</th></tr>
+  <tr><td><code>Bridge.Call</code> says it needs a host bridge</td><td>Nothing installed the host side on THIS session. Call <code>slc_set_bridge</code> with the callback (C, C#, Python, PowerShell), or set <code>HostBridge</code> in-process. A separately installed bridge on another session does not count.</td></tr>
+  <tr><td><code>Bridge.Call</code> says the host refused the request</td><td>Your callback answered a NEGATIVE length. That is the host refusing on purpose; the script catches it, and the engine's sentence is the one to read.</td></tr>
+  <tr><td><code>slc_invoke</code> answers a negative number</td><td>A transport failure: an unknown or freed handle, a session already running, or a re-entrant call. The sentence is in <code>slc_last_error</code>, never in the buffer.</td></tr>
+  <tr><td>The callback was never called, or the process died in it</td><td>The delegate or <code>CFUNCTYPE</code> object was collected, or a PowerShell script block was used. Hold the delegate in a field, or compile it.</td></tr>
+  <tr><td>Python: a length is answered but the document is missing</td><td>The buffer parameter was declared <code>c_char_p</code>. Declare <code>c_void_p</code> and write with <code>ctypes.memmove</code>.</td></tr>
+  <tr><td>PowerShell: <code>PSInvalidOperationException</code> from <code>GetContextFromTLS</code></td><td>A script block was passed as a callback. Compile the callback with <code>Add-Type</code>.</td></tr>
+  <tr><td>PowerShell: <code>$engine.Version</code> is empty</td><td>The PSObject adapter, not the server. Read through <code>InvokeMember(name, GetProperty, ...)</code>.</td></tr>
+  <tr><td>COM: "class not registered", or "the specified module could not be found"</td><td>Not registered (run the installer, or <code>setup/com-register.reg</code>), or a 32-bit client against the x64 server.</td></tr>
+  <tr><td><code>UnsupportedVersion</code></td><td><code>v</code> is missing or names another contract version. The message says which one was read; write <code>"v": 1</code>.</td></tr>
+  <tr><td><code>NoHandler</code></td><td>The script has not called <code>Bridge.Serve</code>, or <code>Bridge.Serve(null)</code> stopped it.</td></tr>
+  <tr><td><code>HandlerReturnedNonEnvelope</code> / <code>HandlerReturnedNothing</code></td><td>The handler returned a raw value instead of <code>Bridge.Ok</code> or <code>Bridge.Fail</code>, or returned a non-object text. The same code covers a missing or non-boolean <code>ok</code>, an <code>ok:true</code> answer carrying <code>e</code>, an <code>e</code> that is not an object, and an error whose <code>code</code> or <code>message</code> is missing or not a non-empty string. A verb must answer with one of the two builders.</td></tr>
+  <tr><td>"the contract is no re-entry on the same session"</td><td>A handler called <code>Bridge.Handle</code> on its own session, or a host called back into the session it was answering. <code>Bridge.Call</code> from a handler is legal; post the host's question to another thread if it needs to ask one while answering.</td></tr>
+  <tr><td>An empty <code>id</code> in the answer</td><td>The request had no <code>id</code> member. Absent stays absent by rule 6, so a handler that echoes <code>req["id"]</code> must tolerate a missing one. A request that sent <code>"id": null</code> gets <code>"id": null</code> back.</td></tr>
+</table>
+
+<h2 id="where">Where the code is</h2>
+<table>
+  <tr><th style="width:44%;">File</th><th>What it holds</th></tr>
+  <tr><td><code>src/Interpreter/Registration/Bridge.cs</code></td><td>The whole script side: the envelope, the one dispatcher (<code>BridgeHandle</code>), the validation and every refusal code.</td></tr>
+  <tr><td><code>src/Host/EmbedApi.cs</code></td><td><code>slc_invoke</code> and <code>slc_set_bridge</code>: the two carriers over the C ABI, including the length convention and the negative status.</td></tr>
+  <tr><td><code>src/Host/ComServer.cs</code></td><td>The COM member <code>Invoke</code> (DISPID 8), forwarding to the same dispatcher.</td></tr>
+  <tr><td><code>src/Host/EmbedCapabilities.cs</code></td><td>The capability bit <code>0x200</code> (<code>bridge</code>) and the revision this build answers.</td></tr>
+  <tr><td><code>docs/embed/abi.json</code></td><td>The manifest both exports and the bit are generated from.</td></tr>
+  <tr><td><code>bindings/ScriptLangCore.h</code>, <code>.cs</code>, <code>scriptlangcore.py</code></td><td>The generated declarations, one set per carrier, so a sample does not retype a signature.</td></tr>
+  <tr><td><code>assets/language/repl/interop/bridge_contract_test.slc</code></td><td>The contract's own suite, driven by a stub host that is a script.</td></tr>
+  <tr><td><code>src/embed/Program.cs</code></td><td>The C ABI harness: a real function pointer in both directions, and the COM server's <code>Invoke</code>.</td></tr>
+</table>
+
+<hr>
+<p><a href="../language/index.html#Bridge">The language reference's <code>Bridge</code> entry</a> states the script-facing rules. <a href="../embed/howto.html#bridge">The embedding page's <code>#bridge</code> section</a> places this contract beside the rest of the C ABI, and its <a href="../embed/howto.html#comserver">#comserver</a> section covers the COM server's registration and its eight members.</p>
+
+</body>
+</html>

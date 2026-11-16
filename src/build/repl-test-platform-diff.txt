@@ -1,0 +1,10 @@
+# Suites whose per-suite status may legitimately differ between the JIT and NativeAOT builds.
+# Format: <suite-name>   # why the difference is expected
+#
+# Keep this list SHORT and justified. Every entry is a documented divergence; an entry without a reason is a
+# bug that has been papered over, and the whole point of the comparison is that a SILENT divergence fails.
+#
+# Known legitimate differences to expect if a suite ever exercises them: LoadAssembly (a capability guard,
+# the AOT build genuinely cannot load assemblies dynamically), and any suite asserting a platform-specific
+# limit (the flat-frame cap is 30000 on JIT and memory-derived on AOT). Suites that accept either wording
+# already pass on both, so they do not belong here.

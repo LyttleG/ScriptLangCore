@@ -1,0 +1,53 @@
+// THE C LAUNCHER'S WIN32 RESOURCES, and each row is load-bearing rather than decoration.
+//
+// ASCII ONLY, on purpose: `windres` reads this file with the locale's code page (not UTF-8) unless told otherwise, so a
+// non-ASCII byte in a string here would land in the binary as mojibake on a French or Cyrillic Windows. The engine's own
+// launcher carries the accented author name because a .NET resource compiler is told the encoding; this one keeps to the
+// printable ASCII range and loses nothing a reader needs.
+//
+// The three entries are found through `-I <repository root>`, which `build.bat` passes, so the icon and the manifest are
+// THE SAME FILES the C# launcher and the engine use: one statement of each, no copies to drift.
+
+// ── THE MANIFEST: RT_MANIFEST (24), id 1 ───────────────────────────────────────────────────────────────────────────
+// Not cosmetic, and it is the one resource whose absence broke 14 suites: it carries the Common-Controls v6 assembly
+// dependency and PerMonitorV2 awareness. A host without it registers NO v6 classes, so measured through a launcher
+// without one the corpus' UI suites failed with `[CreateWinControl]: CreateWindowEx for 'SysLink' failed: 1407`
+// (ERROR_CLASS_NOT_FOUND), a themed control's paint notification never arrived, and `ListView.DeleteColumn` behaved like
+// the legacy control. A payload runs as THIS process, so the manifest has to be this process's.
+1 24 "app.manifest"
+
+// ── THE ICON: RT_GROUP_ICON (14), id 32512 ────────────────────────────────────────────────────────────────────────
+// 32512 is IDI_APPLICATION, the id .NET's `<ApplicationIcon>` uses and the one `tools/slc-pack.slc --icon` rewrites, so a
+// packed exe's icon replaces THIS group instead of adding a second one the shell would ignore. The same icon as the
+// engine's exe, so a packaged app and the CLI it stands in for look alike, and a script's form takes its default icon
+// from `Environment.ProcessPath`, which in a host is this exe.
+32512 ICON "forward.ico"
+
+// ── THE VERSION: RT_VERSION (16), id 1 ────────────────────────────────────────────────────────────────────────────
+// So a packed app and the launcher it came from can be told apart with one right-click. The numbers are the engine's own
+// (1.0.0.0, measured from the C# launcher), and the packer overrides them per app with `--version`.
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "ScriptLangCore"
+            VALUE "FileDescription", "ScriptLangCore launcher"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "ProductName", "ScriptLangCore"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 0x4b0
+    END
+END

@@ -1,0 +1,23 @@
+# Opcodes the compiler never emits, one per line: the name, then '# reason'. '#' starts a comment.
+#
+# Why this file exists: check-opcode-coverage.sh proves every opcode is HANDLED, by the executor, by one of
+# the disassembler's two tables, and by the format table, but nothing there proves an opcode is REACHABLE.
+# A retired opcode's arms cannot be exercised by any suite, and Phase 1's proof instrument (--dump-bytecode)
+# never shows one, so an unexercised arm is invisible. That is not hypothetical: nine under-rendered opcodes
+# sat behind a name-table arm until the operand-table tie found them. Naming the retired set here makes
+# "no suite can reach this" an enforced fact instead of a remembered one.
+#
+# The check is TWO-WAY on purpose. An opcode with no emission site in src/Interpreter/Compiler.cs that is not
+# listed here fails, a new dead opcode must be acknowledged. A listed opcode that gains an emission site
+# also fails, the entry has become a lie, and the registry would be a rubber stamp.
+#
+# "Emission site" means an `Opcode.X` token in Compiler.cs excluding `case Opcode.X:` label lines (the
+# constant folder's labels are not emissions). Keep each reason short and factual.
+#
+# THIS FILE SHRANK TO ONE ENTRY AT v24, which removed six opcodes from the enum entirely (AND, OR, LOAD_BUILTIN,
+# LOAD_GLOBAL, STORE_GLOBAL, NEW): each carried real behaviour that no suite could reach, and each was still
+# REACHABLE BY BUNDLE INPUT, since a hand-crafted body only has to keep its bytes well formed (measured: RETURN
+# patched to NOP loads and runs). Retiring them was a wire change: the enum renumbers, so the fingerprint and the
+# bundle version moved with it. NOP is the one that stays, because its arm is a bare break and it is the compiler's
+# only free alignment/instrumentation slot.
+NOP                 # never emitted; an alignment/instrumentation slot the compiler has not used, KEPT on purpose

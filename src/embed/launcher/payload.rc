@@ -1,0 +1,5 @@
+// THE SLOT a packaged script is written into. The build ships it EMPTY (payload.bin is a 0-byte file), and
+// `tools/slc-pack.slc` fills the same type+name pair with a script's text or a .slcbc's bytes via
+// BeginUpdateResourceW/UpdateResourceW. The launcher reads it with FindResourceW(RT_RCDATA, "SLCPAYLOAD"),
+// and size 0 ("not packaged") is a state it has to be able to see, which is why the entry exists at all.
+SLCPAYLOAD RCDATA "payload.bin"

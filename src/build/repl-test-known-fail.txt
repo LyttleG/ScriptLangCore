@@ -1,0 +1,39 @@
+# Scripts that already fail for reasons UNRELATED to the current work. The runner reports them
+# as "known failure" (visible, but not a gate failure). Keep the reason on the same line.
+# Verified against a pre-change build where noted; see todoplan.md for the full write-up.
+#
+# An entry that outlives its failure is a rubber stamp, so a run in which a listed suite PASSES now reports
+# it too (`known-stale`, plus a "known but passing" count and a list naming the entries). Remove the entry
+# then, NOT a gate failure on purpose, because an entry can be environment-dependent (ffmpeg_test passes
+# where ffmpeg is installed; process_comprehensive_test's timing check is machine-bound).
+#
+# NOTE (2026-09-10): the sqlite entries were removed, those suites were never broken, the runner
+# simply used the wrong working directory. The engine's deployed layout (assets/, tools/,
+# sqlite3.dll) lives next to the executable, so the runner now runs suites from there and
+# crash_test_query_unified / crash_udf_types / crash_udf_leak report ALL TESTS PASSED.
+# NOTE (2026-09-10, second pass): _tuple, error_msgs_test, crash_lib_import and crash_lib_merge
+# were stale TEST EXPECTATIONS, not engine defects, and their suites are now green:
+#   _tuple         , typeof(tuple) is "Tuple" (CLR-style, like "List<int>"/"Meta"); the PATTERN name
+#                     is still lowercase (`t is tuple` is true).
+#   error_msgs_test, indexing a string is supported and yields a char, so the old "expects an error"
+#                     case became a positive assertion.
+#   crash_lib_*    , coroutines became exportable, so countTo is exported instead of skipped:
+#                     "exported 4, skipped 0", "merged 4", __meta.Sources.Count == 4.
+# FIXED (2026-09-10, third pass): crash_360_latest is green, 42 passed / 0 failed. Check 6c was a
+# real engine bug: the compiler emitted CALL_VAL for a callee held in a LOCAL (how a nested function
+# is referenced) without any ref/out guard, and only the string-callee CALL path wraps the caller's
+# slot in a RefCell, so the write-back was lost for a ref call between two nested functions.
+# Resolved in two stages: first both CALL_VAL sites fell back to the tree, then (fourth pass) the VM's
+# CALL_VAL learned to wire ref args itself, so those functions stay compiled.
+# FOURTH PASS (2026-09-10): the VM's CALL_VAL now rewires ref args as a RefCell over the caller's
+# local slot (the index array is allocated only when a ref arg is actually present), so the compiler
+# no longer needs to bail for ref, only OUT args still fall back (they need the tree's assignment
+# tracking, as does a callee that is not a script function). Measured on the 6c shape, 200k
+# iterations: 39.3 s vs 53.6 s with the tree fallback (1.36x), VM invocations 200k -> 400k, identical
+# checksum; crash_360_latest 42/42, filters ref 11/11, lambda 5/5, tuple 8/8, pattern 7/7.
+# NOTE (2026-09-10, fifth pass): crash_coroutine, stress_dict_perf, bench_vm_ab, gc_bench and
+# bench_memory_gc were removed, they are slow but PASSING, so each now carries a per-suite TIMEOUT=
+# in tools/repl-test-env.txt and their checks gate again (parked here they would never run again,
+# hiding a real regression). process_comprehensive_test stays: it FAILS a check (18 passed / 1 failed,
+# its WaitForExit(200) is too tight on this machine), which no timeout can fix.
+ffmpeg_test.slc                  # environment: ffmpeg not installed

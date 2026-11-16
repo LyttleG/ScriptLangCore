@@ -1,0 +1,25 @@
+# Identical-body groups that tools/check-dup-bodies.sh accepts BY NAME, one line per group member. The rule flags
+# EVERY group it finds, so a group is either collapsed or listed here with the reason it cannot be. Every MEMBER of
+# a group must be listed (the rule checks each file/name pair), and an entry must name the FIX, not the excuse: a
+# placeholder here is worse than a red gate, which is why the script that writes entries refuses to invent one.
+#
+# EMPTY as of 2026-10-08, which is its goal: an entry is for a group that CANNOT be hoisted, and every group this
+# rule has found could. The two that stood here were fixed rather than excused, and each entry named its own fix
+# before the fix existed: FillSetFrom/FillListFrom by IScriptItemCollection (a narrower interface for
+# item-adding collections), and Label/TextBox by TextControl (a base for text-bearing controls). The five groups
+# collapsed before them are recorded in AGENTS.md, and the one that was never real was the collector phantom.
+#
+# 2026-11-09, three groups APPEAR because of the file split and not because the code changed: a same-file,
+# same-name group reads as an overload set, and splitting InterpreterTypes.cs into per-concern files and Ui.cs into
+# per-type files moved these copies into different files. The CheckBox/RadioButton pair was COLLAPSED into
+# ButtonBase (the pending-checked state and OnHandleCreated are one rule for both toggles) rather than listed; the
+# two collection pairs and the Control/Form menu shadow are listed, member by member, because neither can be
+# hoisted without the design stated in its reason.
+#
+# file<TAB>name<TAB>why
+Interpreter/Interpreter.ScriptHashSets.cs	Clear	Clearing a set is Clear + TrimExcess on the TYPE'S OWN field, a HashSet<object?> in one type and a HashSet<T> in the other, and the two lists do the same to a List, so there is no storage they share. The DISPATCH is already hoisted (ScriptCollectionBase.InvokeMethod); the body cannot be until the storage moves with it. Fix: a storage-typed base, ScriptCollectionBase<TStorage>, that owns the field, and then one Clear serves all four.
+Interpreter/Interpreter.ScriptLists.cs	Clear	Same group as Interpreter.ScriptHashSets.cs Clear: this is the LIST's copy, Clear + TrimExcess on a List<object?> or a List<T>. Nothing in the four types is shared but the two call names. Fix: the same ScriptCollectionBase<TStorage> that owns the storage, which retires the whole group at once.
+Interpreter/Interpreter.ScriptHashSets.cs	Add	Add(item, line, column) is CoerceTo followed by an insert into the set's OWN storage, HashSet<object?> keeping the coerced object and HashSet<T> keeping a cast T, while the list's copy appends to a List. The coercion is the shared half and already lives in CoerceTo; the insert cannot be. Fix: the same storage-typed base as Clear, whose one Add can then serve a set and a list because it holds the field.
+Interpreter/Interpreter.ScriptLists.cs	Add	Same group as Interpreter.ScriptHashSets.cs Add: this is the boxed list's copy, byte-identical to the boxed set's because both coerce and then insert, differing only in the field they insert into. Fix: the storage-typed ScriptCollectionBase<TStorage> named for Clear.
+Ui/Interpreter.Control.WndProc.cs	SetMenu	Form's SetMenu is a `new` SHADOW, not a copy: the script's own member lookup on a Form has to FIND it on Form (the recorded reason the menu door lives there rather than on Control), and both bodies are one cast plus one call to Interpreter.SetMenu. Fix: teach the lookup table to bind an inherited member through the derived receiver, then Form's shadow can be deleted and this pair disappears with it.
+Ui/Interpreter.Form.cs	SetMenu	Same group as Ui/Interpreter.Control.WndProc.cs SetMenu: this is the shadowing declaration, whose parameter is `object` because a script-typed Menu parameter was refused as "Method 'SetMenu' not found" (recorded on the method). Fix: the binder change named on the Control entry; until then the shadow is what makes `form.SetMenu(menu)` resolve.

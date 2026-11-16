@@ -1,0 +1,3 @@
+# The build's own output: the compiled `.res` and the exe `build.bat` produces when it runs without an argument.
+# Nothing here is a source, so nothing here belongs in the repository.
+build/

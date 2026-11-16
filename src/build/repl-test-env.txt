@@ -1,0 +1,66 @@
+# Per-suite ENVIRONMENT overrides for run-repl-tests.sh. Keep the reason on the same line.
+#
+# Format:  <script>.slc   VAR=VALUE [VAR=VALUE ...]   # why this is safe
+#
+# Use this only where the gate cannot express a build-dependent property on its own, and always
+# state what the default would do instead. Prefer fixing the engine or the suite: an entry here
+# means the suite is genuinely correct but needs a knob the default run does not set.
+#
+# Two kinds of entry, both scoped to the ONE suite on the line (never global):
+#   * VAR=VALUE   , exported into that suite's environment. A runaway recursion suite depends on the
+#                     catchable depth guard, so a blanket SLC_VM_MAXFRAMES would remove the protection
+#                     those suites assert.
+#   * TIMEOUT=SEC , the runner's per-suite timeout (default 20s), for suites that are merely SLOW.
+#                     These are deliberately NOT parked in repl-test-known-fail.txt: there they would
+#                     never gate anything, so a real regression in them would go unnoticed. Values carry
+#                     ~2x headroom over the slowest JIT measurement (JIT is the binding platform; the
+#                     same suite is faster on NativeAOT), because the measured variance is large
+#                     (crash_coroutine: 22s in one run, 43s in another).
+#
+_vm_gen.slc   SLC_VM_MAXFRAMES=1100000   # flat generator recursion needs ~1M frames, but the JIT
+                                            # default cap is 30000 (deliberate runaway guard: the
+                                            # JIT process dies uncatchably at 40000-100000 levels in
+                                            # re-entrant shapes). The flat in-place generator drive
+                                            # is memory-bounded, not stack-bounded, verified on the
+                                            # JIT Debug build: 50 passed / 0 failed in 15 s.
+
+# ── slow but PASSING suites: give them room, and let their checks gate again ──
+crash_memory_bench_sqlite.slc TIMEOUT=180  # SQLite memory benchmark; >90 s on JIT (it was
+                                                # timing out at the 20 s default)
+crash_coroutine.slc   TIMEOUT=120   # 63 checks; 43 s on JIT (22 s in a lighter run), ~20 s on AOT
+stress_dict_perf.slc  TIMEOUT=180   # 3 checks; 73 s on JIT
+bench_vm_ab.slc       TIMEOUT=120   # VM-vs-tree A/B benchmark; 39 s on JIT
+gc_bench.slc          TIMEOUT=300   # GC benchmark; 114 s on JIT
+bench_memory_gc.slc   TIMEOUT=150   # memory/GC benchmark; 45 s on JIT
+crash_hashset_test.slc TIMEOUT=60   # measured ~9s in isolation; exceeded the 20s default under full-gate load (wall-clock, not correctness)
+bench_collections_ops.slc TIMEOUT=120  # collection x loop-style benchmark (N=1e6, 3 reps). Measured in
+                                          # ISOLATION: 32.6 s on JIT (the slower, binding platform) and 25.9 s
+                                          # on AOT, i.e. the 20 s default was already below a clean JIT run, so
+                                          # 'exceeded 20s' was a wall-clock flake, not a regression (it passed on
+                                          # the AOT half of the same run and failed a 20 s budget on an earlier AOT
+                                          # run too). 120 s is ~3.7x the slower measured value, headroom for
+                                          # full-gate load.
+bench_vm_allocfixes.slc TIMEOUT=60  # 13 checks; measured in ISOLATION 14.3 s on JIT (the slower, binding
+                                       # platform) and 5.9 s on AOT, i.e. the 20 s default was already below a
+                                       # clean JIT run, so 'exceeded 20s' under full-gate load was a wall-clock
+                                       # flake, not a regression (it passed on the AOT half of the same run).
+                                       # 60 s is ~4x the slower measured value, headroom for load.
+com_lifetime_test.slc TIMEOUT=90    # has to WAIT for servers to actually LEAVE, which is wall-clock and not
+                                       # correctness: the release is asserted by the AutoEnded/AutoEndFailed
+                                       # DELTAS (instant reads), but the "nothing is left running" half is a
+                                       # bounded retry on the ROT, and an instance takes 10-15 s to go, so the
+                                       # Word block alone can spend ~15 s. 90 s is that plus the Excel checks and
+                                       # their activations, with room for full-gate load.
+vm_nosource_test.slc   TIMEOUT=120  # drives the CLI in 25-plus child processes; MEASURED 71 s on the Debug build and ~30 s on the AOT publish after the source-mode pins took it to 178 checks, so the old 60 cut the Debug leg off (it already reported as a TIMEOUT there before this change)
+htmx_app_test.slc TIMEOUT=90   # spawns the engine as an HTTP server child and polls until it answers, so a loaded box needs the room
+http_status_contract_test.slc TIMEOUT=120   # THREE children (a pipeline server, a server with no pipeline, a file server), each polled until it answers, then ~30 fetches
+http_router_test.slc TIMEOUT=60   # one server child plus a fetch per route, and it asks curl for the status and the size on top of each one
+http_async_test.slc TIMEOUT=60   # TWO server children (one serving the routes, one for the composition to download from), each polled until it answers, then ~20 fetches and six awaits; measured 11.6 s on the Debug build
+http_error_page_test.slc TIMEOUT=90   # ONE child serving TWICE (the MCP listener and the engine's own file server), polled until BOTH answer, then five fetches; the status-contract budget, which is the same shape with one server instead of two, plus the curl processes
+http_streaming_test.slc TIMEOUT=90   # one server child, then ~25 fetches of which FIVE are deliberately slow (two 1.8 s streamed reads for the timing measurement and its control, a 1 s client cut, then 0.6 s and 1 s waits to prove the producer stopped); measured 13.6 s on the Debug build, so a loaded box needs more than the 20 s default
+
+# ── two suites whose DURATION is not a constant, found by the parity sweep's 30 s default ──
+ffmpeg_test.slc       TIMEOUT=60    # 17.9 s measured on BOTH builds, i.e. 90% of the gate's 20 s default, so a loaded box cuts it off (tools/bundle-parity.sh reported it as "the source itself timed out at 30s"). 2x headroom over that reading.
+scheduler_sample.slc  TIMEOUT=120   # it WAITS for its own scheduled event, so its duration depends on the wall clock: 5.5 s when the minute boundary is near, up to ~60 s otherwise (both measured; the parity sweep hit its 30 s default).
+scheduler_tz_repl_demo.slc TIMEOUT=180  # 71 s on the AOT publish, so tools/bundle-parity.sh could only compare it against its own 30 s default (its baseline entry read "the BUNDLE timed out"). The gate SKIPS it (`*scheduler*`: long-running demos), so this entry is for the parity sweep, which runs every suite in the directory regardless of the skip registry.
+avro_http_test.slc TIMEOUT=90   # one server child polled until it answers, then five fetches of which two are BINARY (curl writing a body and its headers to files); the status-contract shape with a smaller count

@@ -1,0 +1,12 @@
+# Private members tools/check-dead-privates.sh flags, each with the reason it is not simply deleted yet.
+# A check must not land red, and each entry needs a human decision: dead weight to delete, or a LOST
+# CALL SITE to restore. Vm.cs's HasOutParam was the second kind (three call sites had stopped using the ONE
+# implementation), which is why this is a decision list and not a cleanup.
+#
+# EMPTY as of 2026-10-08: the three it first flagged are settled. ResolveRange was PROBED rather than judged
+# (array, string, open-ended and negative-start slicing all still answer), so the feature works and the helper
+# was not a dropped route; OnFormPaint is a redundant second hop for an event whose pixel-reading suites are
+# green; CreateOfKind is superseded by the IControlKind registry. The next name this check reports belongs
+# here with the same shape: what is known, and what would settle it.
+#
+# name <TAB> where <TAB> what is known, and what would settle it

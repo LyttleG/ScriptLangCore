@@ -6,6 +6,11 @@
 (function () {
   'use strict';
 
+  // The stylesheet uses `:target` to open an entry a deep link names, so that works with this script switched off.
+  // This class is what tells it the script IS running: from here on the deep link is handled by focusEntry (which
+  // sets `open`), and `:target` must stop pinning that entry open, or no collapse could ever close it.
+  document.documentElement.classList.add('js');
+
   // ── State ──────────────────────────────────────────────
   const state = {
     query: '',
@@ -79,35 +84,17 @@
       var cat = target.closest('.category');
       if (cat) cat.classList.remove('collapsed');
       target.classList.add('open');
+      // The resolved ID, not the string the caller passed: a namespace entry's display name and its id differ
+      // ("Path" against "Path-ns"), and the sidebar link that gets the active mark is found by the id. There is
+      // deliberately NO filtering here: a click opens ONE entry and never hides another. The version this replaces
+      // treated an entry whose id started with "<its own id>-" as a namespace and filtered the page down to it, so
+      // clicking "Path" (self-match on "Path-ns") or "object" (which owns "object-initializers") left a reader with
+      // 1 or 2 entries on screen and no visible way back.
+      var resolvedId = target.dataset.entryId || name;
       requestAnimationFrame(function() { requestAnimationFrame(function() { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); }); });
       sidebarLinks.forEach(function(a) { a.classList.remove('active'); });
-      var link = document.querySelector('.sidebar a[href="#' + name + '"]');
+      var link = document.querySelector('.sidebar a[href="#' + resolvedId + '"]');
       if (link) link.classList.add('active');
-
-      // Scope: if the entry has namespace children (entries with data-entry-id starting with "name-"),
-      // filter to show only that namespace
-      var prefix = name + '-';
-      var hasChildren = false;
-      entries.forEach(function(e) {
-        if (e.dataset.entryId && e.dataset.entryId.startsWith(prefix)) { hasChildren = true; }
-      });
-      if (hasChildren) {
-        // Clear search input but apply namespace filter
-        searchInput.value = '';
-        entries.forEach(function(e) {
-          var match = (e === target) || (e.dataset.entryId && e.dataset.entryId.startsWith(prefix));
-          e.classList.toggle('hidden', !match);
-        });
-        categoryTitles.forEach(function(title) {
-          var c = title.closest('.category');
-          if (!c) return;
-          var visible = c.querySelectorAll('.entry:not(.hidden)').length > 0;
-          c.classList.toggle('hidden', !visible);
-        });
-        noResults.style.display = 'none'; // hide no-results when scoping
-        var visibleCount = document.querySelectorAll('.entry:not(.hidden)').length;
-        searchStats.textContent = visibleCount + ' entries in ' + name;
-      }
     }
 
     // Fallback: non-entry anchors (e.g. an h4 inside an entry), scroll to the element,
@@ -296,9 +283,15 @@
     title.addEventListener('click', () => {
       const cat = title.closest('.category');
       if (!cat) return;
+      const collapsing = !cat.classList.contains('collapsed');
       cat.classList.toggle('collapsed');
       const toggle = title.querySelector('.toggle');
       if (toggle) toggle.classList.toggle('collapsed');
+      if (collapsing) {
+        // A collapsed category's entries are out of sight, and re-expanding it shows them CLOSED: an entry left open
+        // here read as the page opening one by itself when the category came back.
+        cat.querySelectorAll('.entry.open').forEach(e => e.classList.remove('open'));
+      }
     });
   });
 
@@ -311,9 +304,11 @@
       e.stopPropagation();
       // Don't toggle if user selected text
       if (window.getSelection()?.toString()) return;
-      // Delegate to focusEntry so main content clicks behave identically to sidebar clicks
-      const name = entry.querySelector('.entry-name')?.textContent?.trim();
-      if (name) focusEntry(name);
+      // Delegate to focusEntry so main content clicks behave identically to sidebar clicks. It takes the entry's
+      // ID: the display name and the id differ for a namespace entry ("Path" against "Path-ns"), and the scope
+      // rule keys on the id.
+      const id = entry.dataset.entryId;
+      if (id) focusEntry(id);
     });
   });
 
@@ -369,8 +364,8 @@
       }
       if (!first) first = document.querySelector('.entry:not(.hidden) .entry-name');
       if (first) {
-        const nameEl = first.classList.contains('entry-name') ? first : first.querySelector('.entry-name');
-        if (nameEl) focusEntry(nameEl.textContent.trim());
+        const entryEl = first.classList.contains('entry-name') ? first.closest('.entry') : first;
+        if (entryEl && entryEl.dataset.entryId) focusEntry(entryEl.dataset.entryId);
       }
     }
   });
@@ -480,9 +475,9 @@
       const toggle = cat.querySelector('.toggle');
       if (toggle) toggle.classList.add('collapsed');
     });
-    // Close any open entry
+    // Close any open entry: `Collapse` means the page is back to its folded state, and an entry left open re-appeared
+    // expanded the moment its category was opened again.
     entries.forEach(e => e.classList.remove('open'));
-    state.openEntries.clear();
     sidebarLinks.forEach(a => a.classList.remove('active'));
   });
 

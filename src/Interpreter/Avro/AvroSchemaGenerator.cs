@@ -242,11 +242,14 @@ internal partial class Interpreter
                             $"{member}: a map's key is a string in Avro, and this dictionary's key is " +
                             $"'{TypeInfo.DeclaredSpelling(args[0])}'. Declare Dictionary<string, T> for a map " +
                             "schema.");
+                    // A map's VALUE keeps its `?` the way an array's element does: a null value in a
+                    // `Dictionary<string, long?>` has to be describable, and dropping the mark made the schema say
+                    // `values: "long"` and then refuse the very entry the script declared nullable.
+                    var value = args.Count == 2 ? args[1] : args[0];
                     return new AvroSchema
                     {
                         Kind = AvroKind.Map,
-                        Values = TypeOf(args.Count == 2 ? args[1] : args[0], false, options, byFullName, names,
-                            member)
+                        Values = TypeOf(value, value.IsNullable, options, byFullName, names, member)
                     };
                 }
                 throw new ScriptException(

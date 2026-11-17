@@ -37,7 +37,7 @@ namespace ScriptLangCore;
 ///                                   describes itself and a query can report what it holds without a second artifact.
 ///   slc_avro_json(blob)             the container's records as PURE JSON, DECOMPRESSED with the codec it declares,
 ///                                   which is what lets SQLite's own json_extract / json_each / json_group_array read
-///                                   a stored Avro BLOB directly. `Avro.ContainerSchema` and `Avro.ContainerJson` are
+///                                   a stored Avro BLOB directly. `Avro.ContainerSchema` and `Avro.Json` are
 ///                                   the same two answers from a script, over the same code.
 ///
 /// Arguments arrive as the globals <c>a0</c>, <c>a1</c>, ...: integer, real, text, blob and NULL map to the engine's
@@ -526,7 +526,7 @@ internal static unsafe partial class SqliteExt
     /// <c>slc_avro_json(blob)</c> answers its records as PURE JSON, so `json_extract`, `json_each` and
     /// `json_group_array` read a stored container directly. Both come from the engine's own reader
     /// (<see cref="AvroContainer.SchemaText"/> and <see cref="AvroContainer.ToJson"/>), which is exactly what
-    /// `Avro.ContainerSchema` and `Avro.ContainerJson` answer from a script, so a query and a script cannot disagree
+    /// `Avro.ContainerSchema` and `Avro.Json` answer from a script, so a query and a script cannot disagree
     /// about the same bytes.
     ///
     /// The CODEC is the file's own, so the JSON is DECOMPRESSED with it (null, deflate, snappy, zstandard, gzip,
@@ -582,7 +582,7 @@ internal static unsafe partial class SqliteExt
         if (argc < 1)
         {
             ResultError(ctx, $"{name} takes the bytes of an Avro container as its one argument: the array "
-                + "Avro.WriteContainer answers, stored in a BLOB column");
+                + "Avro.Write answers, stored in a BLOB column");
             return (false, null);
         }
 

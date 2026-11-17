@@ -205,15 +205,24 @@ internal partial class Interpreter
             if (args.Length == 0 || args[0] is not string json)
                 throw new ScriptException("Json.Format expects a JSON string.");
 
-            var indent = args.Length > 1 && args[1] is long i ? (int)i : 2;
-            if (indent < 0) indent = 0;
-            if (indent > 8) indent = 8;
+            // The indent is the writer's own setting, so it reaches it: 0 lays the document out over several
+            // lines with no leading space, 8 is the widest this member allows, and 2 is the default. A second
+            // argument that is not a whole number is refused BY NAME rather than quietly meaning "two spaces":
+            // the argument used to be read as a long only, so an int literal was silently ignored.
+            var indent = 2;
+            if (args.Length > 1)
+            {
+                if (JsonWholeNumber(args[1]) is not long given)
+                    throw new ScriptException("Json.Format: the indent must be a whole number, not '"
+                        + GetFriendlyTypeNameOfValue(args[1]) + "'.");
+                indent = (int)Math.Clamp(given, 0, 8);
+            }
 
             try
             {
                 using var doc = JsonDocument.Parse(json);
                 using var stream = new MemoryStream();
-                using var writer = new Utf8JsonWriter(stream, JsonWriterOpts(true));
+                using var writer = new Utf8JsonWriter(stream, JsonWriterOpts(true, indent));
                 doc.WriteTo(writer);
                 writer.Flush();
                 return Encoding.UTF8.GetString(stream.ToArray());
@@ -427,6 +436,23 @@ internal partial class Interpreter
 
         CurrentFrame.Scopes.Define("Json", jsonNs);
     }
+
+    /// <summary>A script's whole number as a long, or null when the value is not one. Used where a member takes a
+    /// COUNT or a width: <c>Json.Format</c>'s indent reaches the writer, so it has to accept every whole-number
+    /// spelling a script can pass rather than the one the member happens to have been written against (an int
+    /// literal used to be ignored because the arm read a long and nothing else).</summary>
+    private static long? JsonWholeNumber(object? value) => value switch
+    {
+        int i => i,
+        long l => l,
+        short s => s,
+        sbyte sb => sb,
+        byte b => b,
+        ushort us => us,
+        uint ui => ui,
+        ulong ul when ul <= long.MaxValue => (long)ul,
+        _ => null
+    };
 
     /// <summary>Recursively merge two IScriptDictionary for Json.Merge.</summary>
     private static ScriptBoxedDictionary JsonMergeRecursive(IScriptDictionary a, IScriptDictionary b)

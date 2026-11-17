@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/slc.png" alt="Logo" width="128">
+  <img src="forward.ico" alt="Logo" width="64">
 </p>
 
 # ScriptLangCore

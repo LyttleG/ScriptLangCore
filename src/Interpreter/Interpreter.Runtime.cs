@@ -4195,7 +4195,7 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
         // `application/avro`, which is the wire format AvroConvert's HTTP layer uses (`AvroResults.Avro(value)`
         // answers an AvroConvert container). THE CONTAINER IS SELF-DESCRIBING: its header carries the schema and the
         // codec, so a client decodes it from the bytes alone and no side channel has to state either. The options are
-        // `Avro.WriteContainer`'s own (`{ "codec": "zstandard" }`), so a route chooses compression the same way a
+        // `Avro.Write`'s own (`{ "codec": "zstandard" }`), so a route chooses compression the same way a
         // file writer does.
         //
         // A SINGLE record is [record]: a container holds a sequence, and guessing between "one value's binary
@@ -4216,6 +4216,24 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
                     "one record, or use Avro.Serialize for one value's binary encoding.");
             return new HttpResult(200, HttpResult.AvroType, null,
                 AvroContainer.Write(rows, schema, options.Codec, _caseSensitive, "http.Avro"), null);
+        });
+        // http.AvroStream(records, schema [, options]): the SAME container as http.Avro, produced AS IT IS WRITTEN
+        // rather than after the last record has been encoded. The first chunk is the container's header (schema and
+        // codec included), then one chunk per block, so a client starts reading a self-describing file before the
+        // export has finished and nothing has to state a length. The options are the streaming pair (`codec` and
+        // `block`), and the source is what StreamLines accepts (a list, a generator, an Events feed, an async
+        // sequence), which is the difference that matters: a generator of a million rows never has to exist as a
+        // list for this answer to work.
+        httpNs.AddMethod("AvroStream", args =>
+        {
+            var schema = AvroSchemaParser.From(args.Length > 1 ? args[1] : null, "http.AvroStream");
+            var options = AvroStreamOptions.Read(args.Length > 2 ? args[2] : null, "http.AvroStream");
+            var source = StreamSourceFor(args.Length > 0 ? args[0] : null, "http.AvroStream");
+            return new HttpResult(200, HttpResult.AvroType, null, null, null,
+                new HttpStream(HttpStreamFormat.Avro,
+                    new AvroStreamSource(source, schema, options.Codec, options.Block, _caseSensitive,
+                        "http.AvroStream"),
+                    HttpResult.AvroType));
         });
         // http.StreamLines(source [, contentType]) and http.StreamEvents(source): the answer STREAMS, one element
         // per line, with chunked framing, so a big export never has to fit in memory and a client sees each line as
@@ -8841,6 +8859,16 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
         catch (Exception ex) { throw ClrMemberFailure(ex, line, column); }
     }
 
+    /// <summary>The refusal for an index that cannot NAME a script dictionary entry. Such a dictionary is keyed by
+    /// name, so an index holding a POSITION is a shape mistake rather than a missing key, and "the requested key was
+    /// not found" sends a reader looking for a typo: the doors that answer by position are the dictionary's own
+    /// <c>Keys</c>/<c>Values</c> projections and a <c>foreach</c> over its KeyValuePair entries. A key that IS present
+    /// reads normally whatever its type, because a script can put one there, so this text is only ever the MISS.</summary>
+    private string DictionaryKeyShapeText(object? key) =>
+        "a dictionary is keyed by NAME rather than by position, so an index of type " +
+        $"'{GetFriendlyTypeNameOfValue(key)}' cannot reach an entry. Read the Nth entry as dict.Keys[N] and " +
+        "dict.Values[N], or iterate it with foreach and read the KeyValuePair's Key and Value.";
+
     private object? GetArrayElement(object? arrayObj, IReadOnlyList<Expr> indexNodes, int line, int column)
     {
         // Range-slice: obj[rangeExpr]
@@ -8951,6 +8979,10 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
                     if (indexNodes.Count != 1)
                         RuntimeError("Dictionary index requires exactly one argument.", line, column);
                     var key = Evaluate(indexNodes[0]);
+                    // A MISS with an index that is not a name is the SHAPE being wrong rather than the key, so it is
+                    // refused with the doors that answer by position instead of "the requested key was not found".
+                    if (key is not null and not string && !dict.ContainsKey(key))
+                        RuntimeError(DictionaryKeyShapeText(key), line, column);
                     return dict[key!];
                 }
 
@@ -9164,6 +9196,10 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
                 {
                     if (idxVals.Length != 1)
                         RuntimeError("Dictionary index requires exactly one argument.", line, column);
+                    // The same shape rule as the tree core's arm: a miss with an index that is not a NAME is refused
+                    // with the doors that answer by position.
+                    if (idxVals[0] is not null and not string && !dict.ContainsKey(idxVals[0]!))
+                        RuntimeError(DictionaryKeyShapeText(idxVals[0]), line, column);
                     return dict[idxVals[0]!];
                 }
 

@@ -170,7 +170,7 @@ internal sealed class AvroOptions
     /// <summary>The key/value pairs an options value carries, in the FOUR shapes a script can actually hand one
     /// over: the engine's own script dictionary (`[].ToDictionary()` and friends), a `{ }` literal's CLR dictionary,
     /// any other `IDictionary`, and an options JSON TEXT. ONE reader, because the shapes are the engine's and not this
-    /// namespace's: `Avro.Schema`, `Avro.WriteContainer` and `Avro.ContainerJson` all take options, and a shape one
+    /// namespace's: `Avro.Schema`, `Avro.Write` and `Avro.Json` all take options, and a shape one
     /// accepted and another refused would be a trap of this namespace's own making (measured: a `{ "pretty": true }`
     /// literal is `IDictionary`, not an `IScriptDictionary`).
     ///

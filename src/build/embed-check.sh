@@ -585,7 +585,7 @@ var avroSchema = Avro.Schema(AvroRow);
 var avroRows = [].ToList();
 var avroOne = new AvroRow(); avroOne.Id = 1; avroOne.Name = "one"; avroRows.Add(avroOne);
 var avroTwo = new AvroRow(); avroTwo.Id = 2; avroTwo.Name = "two"; avroRows.Add(avroTwo);
-var avroContainer = Avro.WriteContainer(avroRows, avroSchema, { "codec": "zstandard" });
+var avroContainer = Avro.Write(avroRows, avroSchema, { "codec": "zstandard" });
 foreach (var row in Sqlite.Query(lib, db, "create table files (id integer, data blob)")) { }
 foreach (var row in Sqlite.Query(lib, db, "insert into files values (?, ?)", [1, avroContainer])) { }
 foreach (var row in Sqlite.Query(lib, db, "select json_extract(slc_avro_json(data), '\$[1].Name') as name, json_extract(slc_avro_json(data), '\$[0].Id') as id from files")) {

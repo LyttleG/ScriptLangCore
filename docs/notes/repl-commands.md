@@ -849,11 +849,12 @@ Json.Validate("not json"); // false
 
 ### Format / Minify
 
-`Json.Format(jsonString)` pretty-prints an existing JSON string. `Json.Minify(jsonString)` strips whitespace:
+`Json.Format(jsonString [, indent])` pretty-prints an existing JSON string, with `indent` spaces a level (0 through 8, default 2). `Json.Minify(jsonString)` strips whitespace:
 
 ```csharp
 var compact = '{"a":1,"b":2}';
-Json.Format(compact);         // pretty-printed
+Json.Format(compact);         // pretty-printed, two spaces a level
+Json.Format(compact, 4);      // four spaces a level
 Json.Minify(compact);         // same (already minified)
 
 var pretty = '{\n  "a": 1\n}';

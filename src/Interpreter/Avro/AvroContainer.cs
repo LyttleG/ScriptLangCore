@@ -34,15 +34,34 @@ internal static class AvroContainer
     internal static byte[] Write(System.Collections.IEnumerable records, AvroSchema schema, string codec,
         bool caseSensitive, string member)
     {
+        ValidateCodec(codec, member);
+
+        var sync = new byte[SyncSize];
+        RandomNumberGenerator.Fill(sync);
+
+        var writer = new AvroBinaryWriter();
+        writer.WriteRaw(HeaderBytes(schema, codec, sync));
+        writer.WriteRaw(BuildBlock(records, schema, codec, sync, caseSensitive, member));
+        return writer.ToArray();
+    }
+
+    /// <summary>The codecs this engine WRITES, stated once, so a container written in one go and one written block by
+    /// block cannot accept different spellings. bzip2 and xz are refused by name rather than written unreadable.</summary>
+    internal static void ValidateCodec(string codec, string member)
+    {
         if (codec is not ("null" or "deflate" or "snappy" or "zstandard" or "gzip" or "brotli"))
             throw new ScriptException(
                 $"{member}: codec '{codec}' is not supported. This engine writes \"null\", \"deflate\", " +
                 "\"snappy\", \"zstandard\", \"gzip\" and \"brotli\"; bzip2 and xz are refused by name " +
                 "rather than written unreadable.");
+    }
 
-        var sync = new byte[SyncSize];
-        RandomNumberGenerator.Fill(sync);
-
+    /// <summary>The container's HEADER as bytes: the magic, the metadata map (`avro.schema` and `avro.codec`) and the
+    /// sync marker a caller supplies. ONE statement, so the whole-file writer and the streaming one emit the same
+    /// header, and the sync marker is the caller's because a streaming writer needs it before it writes its first
+    /// block.</summary>
+    internal static byte[] HeaderBytes(AvroSchema schema, string codec, byte[] sync)
+    {
         var writer = new AvroBinaryWriter();
         writer.WriteRaw(Magic.ToArray());
         var meta = new AvroBinaryWriter();
@@ -52,7 +71,6 @@ internal static class AvroContainer
         meta.WriteLong(0);
         writer.WriteRaw(meta.ToArray());
         writer.WriteRaw(sync);
-        writer.WriteRaw(BuildBlock(records, schema, codec, sync, caseSensitive, member));
         return writer.ToArray();
     }
 
@@ -93,7 +111,7 @@ internal static class AvroContainer
     /// <summary>One block's framing: the object count, the compressed size, the payload, the sync marker.
     /// EMPTY for no records, and what that means is each caller's decision (a fresh container has no block, an
     /// append adds nothing, a rewrite writes the header alone).</summary>
-    private static byte[] BuildBlock(System.Collections.IEnumerable records, AvroSchema schema, string codec,
+    internal static byte[] BuildBlock(System.Collections.IEnumerable records, AvroSchema schema, string codec,
         byte[] sync, bool caseSensitive, string member)
     {
         var payload = new AvroBinaryWriter();
@@ -199,17 +217,17 @@ internal static class AvroContainer
     /// of a container never have to leave SQL's hands to be queried.
     ///
     /// The codec is the file's own, so an unsupported one is refused BY NAME here (the same message
-    /// `Avro.ReadContainer` gives) rather than producing JSON from a payload nobody decompressed. A `bytes` or `fixed`
+    /// `Avro.Read` gives) rather than producing JSON from a payload nobody decompressed. A `bytes` or `fixed`
     /// field renders as a JSON array of numbers, which is what this engine's serializer does with a `byte[]`; a union
     /// renders as its chosen branch's value, because that is what the value IS once decoded.
     ///
     /// EAGER on purpose: the answer is one string, so a caller that wants to walk records without materializing them
-    /// has `Avro.ReadContainer("Iterable", data)`, and SQL has a JSON value rather than a cursor.</summary>
+    /// has `Avro.Read("Iterable", data)`, and SQL has a JSON value rather than a cursor.</summary>
     internal static string ToJson(byte[] data, string member, bool pretty = false)
         => Interpreter.SerializeToText(Read(data, null, true, member), pretty: pretty);
 
     /// <summary>Reads every object of a container, in order. The schema comes from the file's own
-    /// `avro.schema`, so a reader needs nothing but the bytes. `Avro.ReadContainer("Iterable", data)` is the
+    /// `avro.schema`, so a reader needs nothing but the bytes. `Avro.Read("Iterable", data)` is the
     /// LAZY door onto the same file (see <see cref="AvroLazyContainer"/>): this one decodes every record before
     /// it answers, which is why a caller that only walks the records once can let the reader do it.</summary>
     internal static List<object?> Read(byte[] data, object? typedAs, bool caseSensitive, string member)

@@ -100,10 +100,13 @@ internal partial class Interpreter
 
     /// <summary>The ONE statement of the JSON writer's options. The encoder that escapes only what JSON requires
     /// (so a + in an ISO 8601 date survives) is a decision, not a detail, and a second copy of it is a second
-    /// answer: the registration file carried its own until 2026-10-02.</summary>
-    internal static JsonWriterOptions JsonWriterOpts(bool pretty) => new()
+    /// answer: the registration file carried its own until 2026-10-02. <paramref name="indentSize"/> is the
+    /// writer's own indentation width, which only matters when <paramref name="pretty"/> is true, and it is
+    /// passed through rather than repeated: <c>Json.Format</c> is the member that lets a script choose it.</summary>
+    internal static JsonWriterOptions JsonWriterOpts(bool pretty, int indentSize = 2) => new()
     {
         Indented = pretty,
+        IndentSize = indentSize,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
@@ -1125,7 +1128,7 @@ internal partial class Interpreter
         // handler, a `Com.Run` callback, an event handler) runs on a closure snapshot that need not hold the class
         // NAMES the file declared, so resolving only through the scope answered "unknown type name 'Row'" for a
         // class of the same file when the same read was performed from a route (measured, through
-        // `Avro.ReadContainer(Row, ctx.RequestBytes)`). The registry is where a declared class actually lives, and
+        // `Avro.Read(Row, ctx.RequestBytes)`). The registry is where a declared class actually lives, and
         // it uses the interpreter's own comparer.
         var classInfo = scope.TryGet(typeName, out var typeObj) && typeObj is ClassInfo fromScope
             ? fromScope

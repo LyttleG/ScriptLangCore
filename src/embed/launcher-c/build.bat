@@ -101,10 +101,7 @@ REM LEFT OUT, each measured rather than assumed: -flto and -fno-unwind-tables ch
 REM and the unwind tables survive the link either way), and -Wl,--disable-dynamicbase with --disable-reloc-section buys
 REM only 512 B while turning ASLR OFF for the launcher AND for every app packaged out of it, which no size win of half a
 REM kilobyte can buy.
-"%GCC%" -std=c11 -Oz -fno-stack-protector -fcf-protection=none -fomit-frame-pointer -mno-stack-arg-probe -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 -fno-plt -s -Wall -Wextra -Werror -fno-builtin -mconsole -ffunction-sections -fno-asynchronous-unwind-tables -fno-unwind-tables -fdata-sections -fno-ident -Wl,--gc-sections -Wl,--build-id=none -Wl,--no-insert-timestamp -nostartfiles -nostdlib -e wmainCRTStartup -o "%OUT%" "%HERE%\launcher.c" "%RES%" -lkernel32 -lshell32
-REM "%GCC%" -m32 -std=c11 -Oz -fno-stack-protector -fcf-protection=none -fomit-frame-pointer -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 -fno-plt -Wall -Wextra -Werror -fno-builtin -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -c "%HERE%\launcher.c" -o "%HERE%\launcher.obj"
-REM windres --target=pe-i386 -O coff -i "%HERE%\launcher.rc" -o "%HERE%\build\launcher_res.obj"
-REM crinkler.exe /SUBSYSTEM:CONSOLE /ENTRY:wmainCRTStartup /OUT:"%OUT%" "%HERE%\launcher.obj" "%HERE%\build\launcher_res.obj" kernel32.a shell32.a /COMPMODE:SLOW /TRANSFORM:CALLS /REPORT:"%HERE%\report.html"
+"%GCC%" -std=c11 -Oz -fno-stack-protector -fomit-frame-pointer -mno-stack-arg-probe -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 -fno-plt -s -Wall -Wextra -Werror -fno-builtin -mconsole -ffunction-sections -fno-asynchronous-unwind-tables -fno-unwind-tables -fdata-sections -fno-ident -Wl,--gc-sections -Wl,--build-id=none -Wl,--no-insert-timestamp -nostartfiles -nostdlib -e wmainCRTStartup -o "%OUT%" "%HERE%\launcher.c" "%RES%" -lkernel32 -lshell32
 IF ERRORLEVEL 1 (
   ECHO   C LAUNCHER BUILD FAILED: gcc refused "%HERE%\launcher.c".
   EXIT /B 1

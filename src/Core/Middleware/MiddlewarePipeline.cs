@@ -80,6 +80,9 @@ public sealed class HttpContext
             if (_bodyChunksTaken)
                 throw new ScriptException("ctx.Body cannot be read after ctx.BodyChunks(): a request body is read "
                     + "once, and this one has been taken chunk by chunk.");
+            if (_bodyStreamTaken)
+                throw new ScriptException("ctx.Body cannot be read after Avro.OpenReader(ctx): a request body is read "
+                    + "once, and this one has been streamed record by record.");
             _bodyReadWhole = true;
             _body = ReadBodyWhole();
             return _body;
@@ -111,6 +114,8 @@ public sealed class HttpContext
             + "already read whole, so there is nothing left to read line by line.");
         if (_bodyChunksTaken) throw new ScriptException("ctx.BodyLines() cannot be used after ctx.BodyChunks(): a "
             + "request body is read once, and this one has been taken chunk by chunk.");
+        if (_bodyStreamTaken) throw new ScriptException("ctx.BodyLines() cannot be used after Avro.OpenReader(ctx): "
+            + "a request body is read once, and this one has been streamed record by record.");
         _bodyLinesTaken = true;
         return ReadBodyLines();
     }
@@ -124,7 +129,7 @@ public sealed class HttpContext
     /// half-consumed stream; a request with no body answers null (a GET); and a body the PROGRAM set is that text's
     /// UTF-8 bytes, which consumes nothing, so the textual doors stay open.
     ///
-    /// `Avro.ReadContainer(SlcFile, ctx.RequestBytes)` is the pair this exists for, and `http.Avro(...)` is the
+    /// `Avro.Read(SlcFile, ctx.RequestBytes)` is the pair this exists for, and `http.Avro(...)` is the
     /// answer side: one route can store what the other sends with no base64 in between.</summary>
     public byte[]? RequestBytes
     {
@@ -140,6 +145,9 @@ public sealed class HttpContext
             if (_bodyChunksTaken)
                 throw new ScriptException("ctx.RequestBytes cannot be read after ctx.BodyChunks(): a request body is "
                     + "read once, and this one has been taken chunk by chunk.");
+            if (_bodyStreamTaken)
+                throw new ScriptException("ctx.RequestBytes cannot be read after Avro.OpenReader(ctx): a request body "
+                    + "is read once, and this one has been streamed record by record.");
             if (RequestBodyStream == null)
             {
                 // The PROGRAM set this body (a middleware building a sub-request, or a suite), so its bytes are that
@@ -184,6 +192,8 @@ public sealed class HttpContext
             + "already read whole, so there is nothing left to read chunk by chunk.");
         if (_bodyLinesTaken) throw new ScriptException("ctx.BodyChunks() cannot be used after ctx.BodyLines(): a "
             + "request body is read once, and this one has been taken line by line.");
+        if (_bodyStreamTaken) throw new ScriptException("ctx.BodyChunks() cannot be used after Avro.OpenReader(ctx): "
+            + "a request body is read once, and this one has been streamed record by record.");
         var size = chunkSize <= 0 ? DefaultChunkSize : Math.Clamp(chunkSize, MinChunkSize, MaxChunkSize);
         if (RequestBodyStream == null)
         {
@@ -294,14 +304,70 @@ public sealed class HttpContext
         return buffer.Length > 0 ? buffer.ToArray() : null;
     }
 
+    /// <summary>The request body as a STREAM, for a reader that walks it piece by piece and cannot hold it: an Avro
+    /// container, which is what `Avro.OpenReader(ctx)` takes. The stream is the request's own, it cannot seek, and it
+    /// is only readable while the request is being handled.
+    ///
+    /// The rules are the other doors', with one addition: the body is read ONCE, so this door and `ctx.Body`,
+    /// `ctx.BodyLines()`, `ctx.RequestBytes` and `ctx.BodyChunks()` exclude one another and each refusal names the door
+    /// already used; a request with no body refuses by name; a body the PROGRAM set is accepted as that text's UTF-8
+    /// bytes in a `MemoryStream`, which consumes nothing, so a suite can drive this door with no socket in between.
+    ///
+    /// WHAT THE CALLER MUST DO: read the stream to the end, or drain it, before the answer. The server drains only a
+    /// body NOBODY touched (see `BodyWasTouched`), so a body taken here is the caller's to finish.</summary>
+    internal RequestBodyTake TakeRequestBodyStream(string member)
+    {
+        if (_bodyBytesTaken)
+            throw new ScriptException($"{member}: the request body was already read by ctx.RequestBytes, so there is "
+                + "nothing left to stream.");
+        if (_bodyReadWhole)
+            throw new ScriptException($"{member}: the request body was already read by ctx.Body, so there is nothing "
+                + "left to stream.");
+        if (_bodyLinesTaken)
+            throw new ScriptException($"{member}: the request body was already read by ctx.BodyLines(), so there is "
+                + "nothing left to stream.");
+        if (_bodyChunksTaken)
+            throw new ScriptException($"{member}: the request body was already taken by ctx.BodyChunks(), so there is "
+                + "nothing left to stream.");
+        if (_bodyStreamTaken)
+            throw new ScriptException($"{member}: the request body was already taken by Avro.OpenReader(ctx): a "
+                + "request body is read once.");
+        if (RequestBodyStream == null)
+        {
+            // A body the PROGRAM set has no stream: it is that text's UTF-8 bytes, exactly as `ctx.RequestBytes`
+            // answers them, in a stream this caller owns because this call made it.
+            if (_body == null)
+                throw new ScriptException($"{member}: this request has no body to read: a GET sends none, and no body "
+                    + "was set either.");
+            return new RequestBodyTake(new MemoryStream(Encoding.UTF8.GetBytes(_body), writable: false),
+                OwnsStream: true, DrainOnClose: false);
+        }
+        // A request that declared nothing carries nothing: a GET, which has a stream that is already at its end. The
+        // reader would otherwise report a container that stopped inside its magic, which is true but useless.
+        if (RequestBodyLength == 0)
+            throw new ScriptException($"{member}: this request carries no body (its Content-Length is 0), so there is "
+                + "nothing to stream.");
+        // The request's own stream belongs to the SERVER: what a caller owns is whatever it puts over this, and what
+        // it must do on the way out is drain, because the server will not.
+        _bodyStreamTaken = true;
+        return new RequestBodyTake(RequestBodyStream, OwnsStream: false, DrainOnClose: true);
+    }
+
+    /// <summary>What <see cref="TakeRequestBodyStream"/> hands over: the stream to walk, whether the CALLER owns it (a
+    /// body the program set is a `MemoryStream` built for this call, while the request's own stream belongs to the
+    /// server), and whether it has to be drained on the way out so a kept-alive connection is not left with an unread
+    /// payload.</summary>
+    internal readonly record struct RequestBodyTake(Stream Stream, bool OwnsStream, bool DrainOnClose);
+
     /// <summary>True when the program SET the body instead of a client sending one (a middleware building a
     /// sub-request, or a suite), which is why line reading refuses: there is no stream to read.</summary>
     internal bool BodyWasGiven => RequestBodyStream == null && _body != null;
 
     /// <summary>Has anything read the body? The server drains an untouched one so a kept-alive connection is not left
-    /// with an unread payload.</summary>
+    /// with an unread payload. A body taken as a STREAM counts as touched: the reader that took it drains what it did
+    /// not consume when it closes, and draining the same payload twice would break the connection.</summary>
     internal bool BodyWasTouched => _body != null || _bodyLinesTaken || _bodyReadWhole || _bodyBytesTaken
-        || _bodyChunksTaken;
+        || _bodyChunksTaken || _bodyStreamTaken;
 
     /// <summary>The request's body stream, handed over by the server, which owns it. Null when the program built this
     /// context itself, and then <see cref="Body"/> is whatever it set.</summary>
@@ -314,6 +380,7 @@ public sealed class HttpContext
     private bool _bodyLinesTaken;
     private bool _bodyBytesTaken;
     private bool _bodyChunksTaken;
+    private bool _bodyStreamTaken;
 
     /// <summary>The request's headers, because a middleware sometimes has to know WHO is asking. HTMX identifies
     /// itself with `HX-Request: true`, and a person typing the URL sends nothing: that is the difference between

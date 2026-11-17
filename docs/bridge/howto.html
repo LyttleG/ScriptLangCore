@@ -125,6 +125,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
   <a href="#carriers">The five carriers</a>
   <a href="#depth">No re-entry, and threads</a>
   <a href="#wire">What travels</a>
+  <a href="#pipeline">Paging a big result</a>
   <a href="#checking">Checking a carrier</a>
   <a href="#trouble">Troubleshooting</a>
   <a href="#where">Where the code is</a>
@@ -1080,6 +1081,55 @@ End Sub</code></pre>
   <li><strong>Nothing about the host leaks into the script.</strong> A COM client, a Python process and a C launcher all answer the same document for the same verb, which is the property the five probes below check identically.</li>
 </ul>
 
+<h2 id="pipeline">Paging a big result: a sqlite dump, page by page</h2>
+<p>The paging keys are what make the contract usable as a data pipeline, and they need no engine feature: a verb reads one page, answers it, and says where the next one starts. <code>assets/language/repl/interop/bridge_pipeline_test.slc</code> is that recipe as a pin, driven by a stub host that is the same script.</p>
+
+<pre><code>var db = Sqlite.OpenDb(Application.DataPath + "/reports.sqlite");
+var total = 0;
+foreach (var r in Sqlite.Query(db, "SELECT COUNT(*) AS n FROM rows")) { total = r["n"]; }
+
+Bridge.Serve(fun (req) {
+    var p = req["p"];                                  <span style="color:var(--text-dim);">// the host's cursor and size</span>
+    var rows = [].ToList();
+    foreach (var r in Sqlite.Query(db, "SELECT id, name, body FROM rows ORDER BY id LIMIT ? OFFSET ?",
+                                   [p["limit"], p["offset"]])) {
+        rows.Add({ id: r["id"], name: r["name"], body: r["body"] });
+    }
+    var next = p["offset"] + rows.Count;
+    var done = false;
+    if (next &gt;= total) { next = null; done = true; }
+    return Bridge.Ok(req["id"], { "count": rows.Count, "rows": rows, "$next": next, "$done": done });
+});</code></pre>
+
+<p>The host walks it with one request outstanding, because no carrier allows two:</p>
+<pre><code>var offset = 0;
+var received = 0;
+while (true) {
+    var answer = Bridge.Call('{"v":1,"id":"page-1","m":"db.page","p":{"offset":' + offset + ',"limit":1000}}');
+    if (!answer["ok"]) { print("page refused: " + answer["e"]["code"]); break; }
+    received = received + answer["r"]["count"];
+    var next = answer["r"]["$next"];
+    if (next == null) { break; }
+    offset = next;
+}</code></pre>
+
+<ul>
+  <li><strong>The keys are the contract's, the cursor's own shape is not.</strong> <code>$page</code>, <code>$next</code> and <code>$done</code> are reserved so one generic client can page a verb that opts in; what travels inside <code>p</code> (an offset and a limit here, a keyset cursor or a list of ids elsewhere) is the application's business, and a verb that does not read <code>$page</code> simply sees an ordinary member it may ignore.</li>
+  <li><strong>Resume, never restart.</strong> A page lost in transit is recovered by sending that request again, because the cursor travels in <code>$next</code> instead of living on the server. <code>id</code> is the correlation handle and the natural idempotency key, and the dispatcher does not dedupe, so a handler whose page has an effect owns making a repeat safe, and answers <code>retry: false</code> otherwise.</li>
+  <li><strong>The tail says so.</strong> A page past the end answers <code>count: 0</code> with <code>$done: true</code> and no <code>$next</code>, and a page that runs past the end answers only the rows that are left, so a host stops on the document rather than on a count it was told in advance.</li>
+  <li><strong>The host pulls; nothing pushes.</strong> A dump, an export or a report is this shape by construction, while rows that must arrive AS THEY HAPPEN are a different door: <code>http.StreamLines</code> and <code>http.StreamEvents</code> write a chunked body, JSONL or SSE, that a client reads line by line. A script cannot send pages on its own.</li>
+</ul>
+
+<p><strong>What a dump costs</strong>, on this box (Windows 11, the NativeAOT publish), a 100,000-row table through the stub host at four page sizes:</p>
+<table>
+  <tr><th>Page size</th><th>Requests</th><th>Total</th><th>Slowest page</th><th>Rows a second</th></tr>
+  <tr><td>1,000</td><td>100</td><td>1.00 s</td><td>17 ms</td><td>99,900</td></tr>
+  <tr><td>5,000</td><td>20</td><td>1.30 s</td><td>62 ms</td><td>77,000</td></tr>
+  <tr><td>20,000</td><td>5</td><td>1.17 s</td><td>207 ms</td><td>85,000</td></tr>
+  <tr><td>100,000, one document</td><td>1</td><td>1.06 s</td><td>932 ms</td><td>94,000</td></tr>
+</table>
+<p>The total barely moves while the slowest page moves by a factor of 55, which is the reason to page at all: the payload is the cost and the request is not. The same 100,000 rows split as a sqlite read (176 ms, or 142 ms through <code>Sqlite.QueryLazy</code>), building the per-row documents (about 470 ms), serializing the table (81 ms, 69 bytes a row) and parsing it back (181 ms); a request whose answer is small costs 16 microseconds, so the envelope disappears next to the rows. Two consequences: choose a page size for the latency and the memory you can afford rather than for throughput, and keep the row shape lean, because parallel columns serialize to 48 bytes a row where named objects take 69.</p>
+
 <h2 id="checking">Checking a carrier</h2>
 <p>Every one of the five carriers was driven through the SAME ten checks, so a difference between them is a difference in the carrier and not in what was asked of it:</p>
 <ol>
@@ -1099,6 +1149,7 @@ End Sub</code></pre>
   <tr><th style="width:42%;">Instrument</th><th>What it proves</th></tr>
   <tr><td><code>src/embed/Program.cs</code> (the embedding harness)</td><td>The C ABI over a REAL function pointer: both directions, the two-pass length, a re-entrant verb refused, a negative answer as a refusal, and the COM server's <code>Invoke</code> over IDispatch.</td></tr>
   <tr><td><code>assets/language/repl/interop/bridge_contract_test.slc</code></td><td>The contract itself, with a stub host that is just a script: the envelope, the version, the verb, the parameters object including an explicit null, the handler's own failure, a non-envelope answer, the answer's whole shape (exactly one of <code>r</code> or <code>e</code>, and the error's members), a handler calling the host while serving, and the id echoed four ways. Runs on both engines.</td></tr>
+  <tr><td><code>assets/language/repl/interop/bridge_pipeline_test.slc</code></td><td>The contract as a data pipeline: a sqlite table walked page by page through <code>$next</code> and <code>$done</code>, a walk resumed from a cursor, the tail and a page that runs past the end, the same dump as one document, and three refusals answered as documents with the session still serving. Runs on both engines.</td></tr>
   <tr><td><code>bindings/BridgeTest.py</code></td><td>The Python carrier, shipped: the host half and the script half in one run, plus every refusal, and <code>PYTHON BRIDGE OK</code> as the answer a driver asserts.</td></tr>
   <tr><td><code>assets/language/com/VbaBench.bas</code>, <code>VbaBench.xlsm</code></td><td>The VBA carrier as a workbook: <code>RunBridgeSelfTest</code> drives <code>Invoke</code> in nine named checks and returns <code>BRIDGE OK</code>; <code>bindings/vba-bench-check.ps1</code> rebuilds the workbook from the module and asserts both the verdict and that the text it carries is that file, line for line.</td></tr>
   <tr><td><code>src/build/embed-check.sh</code></td><td>The published DLL end to end, including the COM registration chain and the process-level legs.</td></tr>

@@ -78,11 +78,7 @@ internal static class AvroSchemaWriter
                     Quote(builder, ns);
                 }
                 AppendAliases(builder, schema);
-                if (schema.Doc is { } doc)
-                {
-                    builder.Append(",\"doc\":");
-                    Quote(builder, doc);
-                }
+                AppendDoc(builder, schema.Doc);
                 builder.Append(",\"fields\":[");
                 for (var i = 0; i < schema.Fields.Count; i++)
                 {
@@ -107,11 +103,7 @@ internal static class AvroSchemaWriter
                         }
                         builder.Append(']');
                     }
-                    if (field.Doc is { } fieldDoc)
-                    {
-                        builder.Append(",\"doc\":");
-                        Quote(builder, fieldDoc);
-                    }
+                    AppendDoc(builder, field.Doc);
                     builder.Append('}');
                 }
                 builder.Append("]}");
@@ -134,6 +126,7 @@ internal static class AvroSchemaWriter
                     Quote(builder, enumNs);
                 }
                 AppendAliases(builder, schema);
+                AppendDoc(builder, schema.Doc);
                 builder.Append(",\"symbols\":[");
                 for (var i = 0; i < schema.Symbols.Count; i++)
                 {
@@ -167,6 +160,7 @@ internal static class AvroSchemaWriter
                 }
                 builder.Append(",\"size\":").Append(schema.FixedSize);
                 AppendAliases(builder, schema);
+                AppendDoc(builder, schema.Doc);
                 if (schema.LogicalType is { } fixedLogical)
                     AppendLogical(builder, schema, fixedLogical);
                 builder.Append('}');
@@ -182,6 +176,15 @@ internal static class AvroSchemaWriter
         if (logical != "decimal") return;
         builder.Append(",\"precision\":").Append(schema.Precision);
         builder.Append(",\"scale\":").Append(schema.Scale);
+    }
+
+    /// <summary>A named type's or a field's doc, when it has one. ONE door, because the record, the field, the enum
+    /// and the fixed all carry it and the kind that was left out is how an enum's doc used to be dropped.</summary>
+    private static void AppendDoc(StringBuilder builder, string? doc)
+    {
+        if (doc is null) return;
+        builder.Append(",\"doc\":");
+        Quote(builder, doc);
     }
 
     private static void AppendAliases(StringBuilder builder, AvroSchema schema)

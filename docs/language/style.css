@@ -253,8 +253,11 @@ header h1 small { font-size: 0.75rem; color: var(--text-secondary); font-weight:
 .entry.open .entry-body { display: block; }
 /* A DEEP LINK OPENS THE ENTRY BY ITSELF, so `#Com` in the sidebar works even when the page's script does not run (or
    when its anchors were the only thing the script used to create). Every entry carries its id in the markup for the same
-   reason, and tools/check-doc-nav.sh now requires that a sidebar link has a real id to land on. */
-.entry:target .entry-body { display: block; }
+   reason, and tools/check-doc-nav.sh now requires that a sidebar link has a real id to land on.
+   GATED ON `html:not(.js)`: the script adds that class on start-up, and from then on it owns the deep link (it opens
+   the entry through the `open` class). Without the gate this rule outranked everything: `Collapse`, a collapsed
+   category and focusing ANOTHER entry all lost to it, so the entry a reader had arrived on stayed expanded for ever. */
+html:not(.js) .entry:target .entry-body { display: block; }
 
 .entry-body p { font-size: 0.88rem; margin-bottom: 8px; }
 
@@ -432,6 +435,10 @@ table tr:hover td {
 .entry-body table.cols-3 td:nth-child(2) { width: 30%; font-size: 0.82rem; color: var(--keyword); }
 .entry-body table.cols-3 td:nth-child(3) { width: 45%; }
 
+/* A labelled parameter or option in a member table: the word a script writes, then what it takes. The colour
+   is the table's own key accent, kept apart from the syntax palette so it does not read as code. */
+strong.param-label { color: #c18dccbb; }
+
 /* Right-aligned numeric columns, never wrap a number or a unit, and shrink the column to its content so the
    wide text columns absorb the slack instead of squeezing the digits (width:1% is the table-cell idiom for
    "as narrow as my content allows"). */
@@ -605,6 +612,8 @@ table.cmp-table col.cmp-slc { width: 61%; }
   .op { color: #8a4b00; }
   code { color: #0b4a8f; white-space: normal; overflow-wrap: anywhere; }
   .note code { color: #8a4b00; }
+  /* The key accent is chosen for a dark background and reads as a wash on white, so it is darkened here. */
+  strong.param-label { color: #6b2d7a; }
   mark.hit { background: #ffe9a8; color: #111; }
 
   /* Tables: the header row repeats on every page and a row is never split. */

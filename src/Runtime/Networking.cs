@@ -508,7 +508,7 @@ internal sealed class NativeWebSocketServer
         [".txt"] = "text/plain; charset=utf-8",
         [".md"] = "text/plain; charset=utf-8",
         [".wasm"] = "application/wasm",
-        // An Avro Object Container File, which is what `http.Avro` answers and what `Avro.WriteContainer` writes, so a
+        // An Avro Object Container File, which is what `http.Avro` answers and what `Avro.Write` writes, so a
         // route that serves one with `http.File` and a client that asks for it agree on the type without either saying
         // it. The SAME name `AvroConvert`'s HTTP layer uses.
         [".avro"] = "application/avro"

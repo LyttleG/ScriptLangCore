@@ -210,9 +210,7 @@ internal static class AvroSchemaParser
             Namespace = ns,
             FullName = full,
             Aliases = ReadAliases(element),
-            Doc = element.TryGetProperty("doc", out var doc) && doc.ValueKind == JsonValueKind.String
-                ? doc.GetString()
-                : null
+            Doc = ReadDoc(element, $"record '{full}'", member)
         };
 
         // Registered before the fields are walked: a record that names itself is legal (a linked list).
@@ -258,10 +256,7 @@ internal static class AvroSchemaParser
                 HasDefault = hasDefault,
                 Default = defaultValue,
                 Aliases = ReadAliases(fieldElement),
-                Doc = fieldElement.TryGetProperty("doc", out var fieldDoc) &&
-                      fieldDoc.ValueKind == JsonValueKind.String
-                    ? fieldDoc.GetString()
-                    : null
+                Doc = ReadDoc(fieldElement, $"the field '{fieldName}' of record '{full}'", member)
             });
         }
 
@@ -317,9 +312,7 @@ internal static class AvroSchemaParser
             Namespace = ns,
             FullName = full,
             Aliases = ReadAliases(element),
-            Doc = element.TryGetProperty("doc", out var doc) && doc.ValueKind == JsonValueKind.String
-                ? doc.GetString()
-                : null,
+            Doc = ReadDoc(element, $"enum '{full}'", member),
             EnumDefault = enumDefault
         };
         schema.Symbols.AddRange(list);
@@ -368,9 +361,7 @@ internal static class AvroSchemaParser
             Namespace = ns,
             FullName = full,
             Aliases = ReadAliases(element),
-            Doc = element.TryGetProperty("doc", out var doc) && doc.ValueKind == JsonValueKind.String
-                ? doc.GetString()
-                : null,
+            Doc = ReadDoc(element, $"fixed '{full}'", member),
             FixedSize = size
         };
         context.Named[full] = schema;
@@ -495,6 +486,18 @@ internal static class AvroSchemaParser
                 $"{member}: the type '{full}' is defined twice. 1.12 states two types with the same full name " +
                 "are an error (alias the old one instead of redefining it).");
         _ = simple;
+    }
+
+    /// <summary>A named type's (or a field's) doc, or null. A doc must be TEXT: anything else is refused by name
+    /// rather than dropped, because a round trip that quietly loses the sentence somebody wrote is the one loss a
+    /// reader cannot see.</summary>
+    private static string? ReadDoc(JsonElement element, string owner, string member)
+    {
+        if (!element.TryGetProperty("doc", out var doc)) return null;
+        if (doc.ValueKind == JsonValueKind.String) return doc.GetString();
+        throw new ScriptException(
+            $"{member}: {owner} has a \"doc\" that is not a string ({DescribeJson(doc)}). A doc is the text a " +
+            "reader shows, so it travels as a JSON string.");
     }
 
     private static IReadOnlyList<string> ReadAliases(JsonElement element)

@@ -10,7 +10,14 @@ public enum HttpStreamFormat
     JsonLines,
 
     /// <summary>`data: &lt;text&gt;` then a blank line, `text/event-stream`, which is UTF-8 by definition.</summary>
-    EventStream
+    EventStream,
+
+    /// <summary>The RAW BYTES of an Avro Object Container File, one chunk per header or block, typed
+    /// `application/avro`. It is a format rather than a second kind of result because the transport's job is the same
+    /// in all three cases (pull a piece, write it, flush), and only the ENCODING of what is written differs: the two
+    /// text formats frame an element, while this one writes the bytes the Avro writer produced. `http.AvroStream`
+    /// builds one.</summary>
+    Avro
 }
 
 /// <summary>What a streaming answer PULLS FROM: one element at a time, in the caller's thread, until it answers
@@ -59,8 +66,12 @@ internal static class HttpStreamFraming
     /// <summary>What an SSE answer says it is, fixed by the event-source specification, UTF-8 always.</summary>
     public const string EventStreamType = "text/event-stream";
 
-    public static string ContentTypeFor(HttpStreamFormat format) =>
-        format == HttpStreamFormat.EventStream ? EventStreamType : JsonLinesType;
+    public static string ContentTypeFor(HttpStreamFormat format) => format switch
+    {
+        HttpStreamFormat.EventStream => EventStreamType,
+        HttpStreamFormat.Avro => HttpResult.AvroType,
+        _ => JsonLinesType
+    };
 
     /// <summary>The headers a streamed answer needs BESIDES its content type, and why each is there: `Cache-Control:
     /// no-cache` keeps a browser from storing an event stream, and `X-Accel-Buffering: no` is what stops a reverse
@@ -73,9 +84,17 @@ internal static class HttpStreamFraming
         headers["X-Accel-Buffering"] = "no";
     }
 
-    /// <summary>One element as the bytes of its wire text, terminator included.</summary>
-    public static string Frame(HttpStreamFormat format, object? item) =>
-        format == HttpStreamFormat.EventStream ? FrameEvent(item) : FrameJsonLine(item);
+    /// <summary>One element as the bytes of its wire text, terminator included. An AVRO answer has no text framing at
+    /// all: its chunks are already the bytes of a container, so the transport writes them RAW and this member is never
+    /// the one that encodes one (asking it to would mean framing binary data as JSON, which is the mistake this guard
+    /// exists to refuse).</summary>
+    public static string Frame(HttpStreamFormat format, object? item) => format switch
+    {
+        HttpStreamFormat.EventStream => FrameEvent(item),
+        HttpStreamFormat.Avro => throw new System.InvalidOperationException(
+            "an Avro answer is written as raw byte chunks, not as framed text"),
+        _ => FrameJsonLine(item)
+    };
 
     /// <summary>One JSON value, then a newline. A null element is the JSON `null`, so a stream can carry one.</summary>
     public static string FrameJsonLine(object? item) => Interpreter.SerializeToText(item) + "\n";

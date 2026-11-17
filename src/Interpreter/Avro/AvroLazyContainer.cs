@@ -1,6 +1,6 @@
 namespace ScriptLangCore;
 
-/// <summary>A container read LAZILY: `Avro.ReadContainer("Iterable", data)` answers this instead of a
+/// <summary>A container read LAZILY: `Avro.Read("Iterable", data)` answers this instead of a
 /// materialised list. It is the container's answer to `Json.Deserialize("Iterable", ...)`, and the
 /// correspondence is exact in what it leaves undone: the source is already in hand (the file's bytes), the
 /// header is parsed once so the schema and the codec are known, the BLOCK boundaries are recorded without
@@ -15,7 +15,7 @@ namespace ScriptLangCore;
 /// decompressing a block and decoding its records one at a time is what keeps a file this engine wrote
 /// lazy too. A block written by another tool is decoded the same way, block after block.
 ///
-/// THE NAME IS THE DOOR: `Avro.ReadContainer("Iterable", data)` and `... "IEnumerable"` ask for this, which is
+/// THE NAME IS THE DOOR: `Avro.Read("Iterable", data)` and `... "IEnumerable"` ask for this, which is
 /// the one rule `Json.Deserialize` follows as well (a type name decides the shape of the answer). An element
 /// argument (`Iterable&lt;Row&gt;`) is imposed on each record as it is decoded, the way a lazy JSON list imposes
 /// its own element name; a bare name imposes nothing, so the records stay the dictionaries the file holds.</summary>
@@ -114,7 +114,7 @@ internal sealed class AvroLazyContainer : IScriptList
                 if (total > int.MaxValue)
                     throw new ScriptException(
                         $"{_member}: the container declares {total} record(s), which is more than one script list " +
-                        $"can index. Read it in pieces, or with Avro.ReadContainer(data) (no \"{_declared}\" name) " +
+                        $"can index. Read it in pieces, or with Avro.Read(data) (no \"{_declared}\" name) " +
                         "when the count fits.");
                 _count = total;
             }
@@ -194,6 +194,6 @@ internal sealed class AvroLazyContainer : IScriptList
 
     private ScriptException NotEditable(string what) =>
         new($"{_member}: a container read as \"{_declared}\" is a VIEW over the file's bytes, so {what}. Add one " +
-            $"with Avro.AppendContainer(data, records), or read it eagerly (Avro.ReadContainer(data), without the " +
+            $"with Avro.Append(data, records), or read it eagerly (Avro.Read(data), without the " +
             $"\"{_declared}\" name) and edit that copy.");
 }

@@ -356,8 +356,21 @@ internal static class McpServer
                         break;
                     }
                     if (!source.MoveNext(out var item)) break;
-                    var bytes = ResponseTextEncoding.GetBytes(HttpStreamFraming.Frame(format, item));
-                    res.OutputStream.Write(bytes, 0, bytes.Length);
+                    // An AVRO answer needs no framing at all: every chunk is already the bytes of a container (its
+                    // header, then one block), which is what makes the answer self-describing. The two TEXT formats
+                    // are framed by the one helper, so a string arrives quoted (NDJSON) or as itself (SSE).
+                    if (format == HttpStreamFormat.Avro)
+                    {
+                        if (item is not byte[] chunk)
+                            throw new System.InvalidOperationException(
+                                "an Avro stream answered something that is not bytes");
+                        res.OutputStream.Write(chunk, 0, chunk.Length);
+                    }
+                    else
+                    {
+                        var bytes = ResponseTextEncoding.GetBytes(HttpStreamFraming.Frame(format, item));
+                        res.OutputStream.Write(bytes, 0, bytes.Length);
+                    }
                     // Flush per element, or the platform decides when the client sees a line: measured, three
                     // elements 700 ms apart arrived at 2 / 709 / 1416 ms with a flush and in one burst without.
                     res.OutputStream.Flush();

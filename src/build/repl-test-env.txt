@@ -45,6 +45,10 @@ bench_vm_allocfixes.slc TIMEOUT=60  # 13 checks; measured in ISOLATION 14.3 s on
                                        # clean JIT run, so 'exceeded 20s' under full-gate load was a wall-clock
                                        # flake, not a regression (it passed on the AOT half of the same run).
                                        # 60 s is ~4x the slower measured value, headroom for load.
+bench_avro.slc       TIMEOUT=90   # the six-codec container rows (1 000 records each) plus the streaming pair
+                                       # (WriteStream + OpenReader) and two structural checks; measured 31 s
+                                       # on JIT (the binding platform) against the 20 s default, so the
+                                       # default cuts a clean run off. 90 s is ~3x the measured value.
 com_lifetime_test.slc TIMEOUT=90    # has to WAIT for servers to actually LEAVE, which is wall-clock and not
                                        # correctness: the release is asserted by the AutoEnded/AutoEndFailed
                                        # DELTAS (instant reads), but the "nothing is left running" half is a

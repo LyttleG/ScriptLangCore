@@ -393,6 +393,11 @@ public sealed class FileByteWriter : IDisposable
     /// closing), and it answers 0 for a closed handle rather than throwing, so a report can still be built.</summary>
     public long Length => _stream?.Length ?? 0;
 
+    /// <summary>The open stream, for an ENGINE member that writes bytes it already produces in blocks (an Avro
+    /// container's writer). Internal on purpose: a script writes through <see cref="Write(byte[])"/> and owns the
+    /// handle through <see cref="Close"/>, so a CLR stream never has to be a script value.</summary>
+    internal Stream? Stream => _stream;
+
     /// <summary>Push buffered bytes to the file. Closing does this too, so an ordinary upload needs only Close.</summary>
     public void Flush() => _stream?.Flush();
 

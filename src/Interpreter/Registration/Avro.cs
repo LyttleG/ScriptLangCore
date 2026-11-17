@@ -105,8 +105,8 @@ internal partial class Interpreter
                 throw new ScriptException(
                     $"Avro.Deserialize: '{AvroOptions.FriendlyNameOf(args[0])}' leads, so this reads as a TYPE " +
                     "followed by bytes. ONE value needs its schema (Avro.Deserialize(type, data, schema)); every " +
-                    "record of a container file is Avro.ReadContainer(type, data), and " +
-                    "Avro.ReadContainer(\"Iterable\", data) is the lazy walk over one.");
+                    "record of a container file is Avro.Read(type, data), and " +
+                    "Avro.Read(\"Iterable\", data) is the lazy walk over one.");
 
             var bytes = data switch
             {
@@ -196,33 +196,176 @@ internal partial class Interpreter
             return AvroSchemaWriter.ToJson(schema);
         });
 
-        // ── Avro.WriteContainer(records, schema [, options]), a whole Object Container File as bytes. This is
+        // ── Avro.Write(records, schema [, options]), a whole Object Container File as bytes. This is
         //    where a CODEC applies: Encode writes one value's bytes, this writes a stream of them and says
         //    which compression the blocks use. ──
-        avroNs.AddMethod("WriteContainer", args =>
+        // ── Avro.OpenReader(source [, type]), ONE RECORD AT A TIME: the door for a container too big to hold. The
+        //    source is a file path, a container's bytes, or the HttpContext of a request whose body is that container
+        //    (which is a stream that cannot seek, read block by block), and the optional type imposes that class on
+        //    each record as it is decoded, exactly as Read's leading type does. The value is an AvroReader:
+        //    HasNext(), ReadNext(), Schema, Codec, Count, Blocks, Position, Close(). It is forward-only, so `foreach`
+        //    over it consumes it, and it is registered as a declared resource so a forgotten one is closed when the
+        //    run ends. ──
+        avroNs.AddMethod("OpenReader", args =>
         {
-            var options = AvroOptions.Read(args.Length > 2 ? args[2] : null, "Avro.WriteContainer");
-            var schema = AvroSchemaParser.From(args.Length > 1 ? args[1] : null, "Avro.WriteContainer");
+            var source = args.Length > 0 ? args[0] : null;
+            var typeName = args.Length > 1 && args[1] is not null
+                ? AvroValueMap.TypeNameOf(args[1], "Avro.OpenReader")
+                : null;
+            return OpenAvroReader(source, typeName, "Avro.OpenReader");
+        });
+
+        AvroReader OpenAvroReader(object? source, string? typeName, string member)
+        {
+            var self = Current ?? this;
+            Stream stream;
+            // Whether the reader disposes this stream, and whether it drains it on the way out. A body the PROGRAM set
+            // is a MemoryStream this call made, so the reader owns it; the request's own stream belongs to the server,
+            // so the reader owns only the buffer it puts over it and must drain what it did not read.
+            var ownsStream = true;
+            var drainOnClose = false;
+            var abort = default(CancellationToken);
+            switch (source)
+            {
+                case HttpContext ctx:
+                {
+                    var take = ctx.TakeRequestBodyStream(member);
+                    stream = take.Stream;
+                    ownsStream = take.OwnsStream;
+                    drainOnClose = take.DrainOnClose;
+                    abort = ctx.RequestAborted;
+                    break;
+                }
+                case byte[] bytes:
+                    stream = new MemoryStream(bytes, writable: false);
+                    break;
+                case string path when path.Length > 0:
+                {
+                    var resolved = self.ResolvePath(path);
+                    if (!File.Exists(resolved))
+                        throw new ScriptException($"{member}: file not found: '{resolved}'.");
+                    try
+                    {
+                        stream = new FileStream(resolved, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        throw new ScriptException($"{member}: cannot read '{resolved}': {FriendlyExceptionMessage(ex)}");
+                    }
+                    break;
+                }
+                default:
+                    throw new ScriptException(
+                        $"{member}: the source is a file path, the bytes of a container (the array " +
+                        "Avro.Write or File.ReadAllBytes answers), or the HttpContext a handler was given " +
+                        $"(so a posted body streams), not '{AvroOptions.FriendlyNameOf(source)}'.");
+            }
+
+            // A container this engine cannot read is refused by the constructor, and the stream it was handed must
+            // not outlive that refusal: the file handle is what a suite's cleanup would then fail to delete. The
+            // request's stream is the server's, so it is DRAINED instead, which is what lets the connection be reused.
+            try
+            {
+                var reader = new AvroReader(stream, ownsStream, typeName, _caseSensitive, member, abort, drainOnClose);
+                TrackDeclaredResource(reader);
+                return reader;
+            }
+            catch
+            {
+                if (ownsStream) stream.Dispose();
+                else if (drainOnClose) AvroReader.DrainRemainder(stream, abort);
+                throw;
+            }
+        }
+
+        // ── Avro.WriteStream(records, target, schema [, options]), a container written INCREMENTALLY: the header once,
+        //    then one block per `block` records as the source hands them over. The target is a file path (created or
+        //    replaced) or an open FileByteWriter, which stays open, so a caller can put a container into a handle it
+        //    already has. It answers the number of records written. The records are the engine's own stream source
+        //    kinds, so a list, a generator, an Events feed or an async sequence all work. ──
+        avroNs.AddMethod("WriteStream", args =>
+        {
+            var records = args.Length > 0 ? args[0] : null;
+            var target = args.Length > 1 ? args[1] : null;
+            var schema = AvroSchemaParser.From(args.Length > 2 ? args[2] : null, "Avro.WriteStream");
+            var options = AvroStreamOptions.Read(args.Length > 3 ? args[3] : null, "Avro.WriteStream");
+            var self = Current ?? this;
+            var source = StreamSourceFor(records, "Avro.WriteStream");
+            try
+            {
+                switch (target)
+                {
+                    case string path when path.Length > 0:
+                    {
+                        var resolved = self.ResolvePath(path);
+                        try
+                        {
+                            using var file = new FileStream(resolved, FileMode.Create, FileAccess.Write,
+                                FileShare.Read, 64 * 1024);
+                            return AvroStreamWriter.Write(file, source, schema, options, _caseSensitive,
+                                "Avro.WriteStream");
+                        }
+                        // A RECORD that does not fit the schema is a ScriptException and must keep its own message, so
+                        // only the file system's failures are converted here.
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            throw new ScriptException(
+                                $"Avro.WriteStream: cannot write '{resolved}': {FriendlyExceptionMessage(ex)}");
+                        }
+                    }
+                    case FileByteWriter writer:
+                    {
+                        var stream = writer.Stream
+                            ?? throw new ScriptException(
+                                "Avro.WriteStream: this byte writer was closed, so nothing more can be written " +
+                                "through it.");
+                        return AvroStreamWriter.Write(stream, source, schema, options, _caseSensitive,
+                            "Avro.WriteStream");
+                    }
+                    default:
+                        throw new ScriptException(
+                            "Avro.WriteStream: the target is a file path or an open FileByteWriter " +
+                            $"(File.OpenWriteBytes), not '{AvroOptions.FriendlyNameOf(target)}'.");
+                }
+            }
+            finally
+            {
+                source.Dispose();
+            }
+        });
+
+        avroNs.AddMethod("Write", args =>
+        {
+            var options = AvroOptions.Read(args.Length > 2 ? args[2] : null, "Avro.Write");
+            var schema = AvroSchemaParser.From(args.Length > 1 ? args[1] : null, "Avro.Write");
             var records = args.Length > 0 ? args[0] : null;
             if (records is not System.Collections.IEnumerable rows)
                 throw new ScriptException(
-                    "Avro.WriteContainer: the records are a list or an array of values, not " +
+                    "Avro.Write: the records are a list or an array of values, not " +
                     $"'{AvroOptions.FriendlyNameOf(records)}'. A container holds a sequence of objects, so use " +
                     "Avro.Serialize for one value's binary encoding.");
-            return AvroContainer.Write(rows, schema, options.Codec, _caseSensitive, "Avro.WriteContainer");
+            return AvroContainer.Write(rows, schema, options.Codec, _caseSensitive, "Avro.Write");
         });
 
-        // ── The three doors that take a container's BYTES read them the same way, and one helper states it ──
+        // ── The doors that take a container's BYTES read them the same way, and one helper states it ──
         byte[] ContainerBytes(object? data, string member) => data switch
         {
             byte[] raw => raw,
+            // A READER is a stream over a container whose header it has already parsed, so it answers no bytes. The
+            // refusal therefore says what the reader DOES have instead of asking for a copy of the file, and
+            // ContainerSchema names its exact twin there: `Schema` is that same .avsc text, read once.
+            AvroReader => throw new ScriptException(member == "Avro.ContainerSchema"
+                ? $"{member}: this is an AvroReader, which already carries the file's schema: use reader.Schema, " +
+                  "which is that same .avsc text with no second read."
+                : $"{member}: this is an AvroReader, which is a stream over the container rather than its bytes: " +
+                  "pass the byte array (reader.Schema answers the schema a reader carries)."),
             null => throw new ScriptException(
-                $"{member}: the data is required (the byte array Avro.WriteContainer answered)."),
+                $"{member}: the data is required (the byte array Avro.Write answered)."),
             _ => throw new ScriptException(
                 $"{member}: the data is a byte array, not '{AvroOptions.FriendlyNameOf(data)}'.")
         };
 
-        // The one option `ContainerJson` takes: a bare boolean, or an options value carrying `pretty`, because the
+        // The one option `Json` takes: a bare boolean, or an options value carrying `pretty`, because the
         // answer is TEXT destined for a human or for a JSON parser that does not care, and pretty is the only choice
         // that changes. The SHAPES an options value can have are `AvroOptions.Pairs`, so a `{ }` literal (a CLR
         // dictionary) and a JSON text work exactly as they do for every other Avro member.
@@ -244,21 +387,21 @@ internal partial class Interpreter
             return pretty;
         }
 
-        // ── Avro.ReadContainer([type,] data), every object of a container, in order. The schema comes from
+        // ── Avro.Read([type,] data), every object of a container, in order. The schema comes from
         //    the file's own avro.schema, so a reader needs nothing but the bytes. THE TYPE LEADS, as above, and
         //    a type that NAMES THE SEQUENCE (Iterable/IEnumerable) asks for the LAZY read: the header is parsed
         //    once and the block boundaries are recorded without decompressing anything, so a record is decoded
         //    only when it is read. Any other type is a record type, and every record is imposed on it eagerly. ──
-        avroNs.AddMethod("ReadContainer", args =>
+        avroNs.AddMethod("Read", args =>
         {
             var typeArg = args.Length > 1 ? args[0] : null;
             var bytes = ContainerBytes(args.Length > 1 ? args[1] : (args.Length > 0 ? args[0] : null),
-                "Avro.ReadContainer");
-            if (typeArg is null) return AvroContainer.Read(bytes, null, _caseSensitive, "Avro.ReadContainer");
-            var typeName = AvroValueMap.TypeNameOf(typeArg, "Avro.ReadContainer");
+                "Avro.Read");
+            if (typeArg is null) return AvroContainer.Read(bytes, null, _caseSensitive, "Avro.Read");
+            var typeName = AvroValueMap.TypeNameOf(typeArg, "Avro.Read");
             return AvroLazyContainer.NamesLazyRead(typeName, out var declared, out var elementName)
-                ? AvroLazyContainer.Read(bytes, declared, elementName, _caseSensitive, "Avro.ReadContainer")
-                : AvroContainer.Read(bytes, typeName, _caseSensitive, "Avro.ReadContainer");
+                ? AvroLazyContainer.Read(bytes, declared, elementName, _caseSensitive, "Avro.Read")
+                : AvroContainer.Read(bytes, typeName, _caseSensitive, "Avro.Read");
         });
 
         // ── The two doors that answer a STORED file's own description, which is what a reader of a BLOB needs and
@@ -269,72 +412,72 @@ internal partial class Interpreter
         avroNs.AddMethod("ContainerSchema", args =>
             AvroContainer.SchemaText(ContainerBytes(args.Length > 0 ? args[0] : null, "Avro.ContainerSchema"),
                 "Avro.ContainerSchema"));
-        avroNs.AddMethod("ContainerJson", args =>
+        avroNs.AddMethod("Json", args =>
         {
-            var pretty = JsonOption(args.Length > 1 ? args[1] : null, "Avro.ContainerJson");
-            return AvroContainer.ToJson(ContainerBytes(args.Length > 0 ? args[0] : null, "Avro.ContainerJson"),
-                "Avro.ContainerJson", pretty);
+            var pretty = JsonOption(args.Length > 1 ? args[1] : null, "Avro.Json");
+            return AvroContainer.ToJson(ContainerBytes(args.Length > 0 ? args[0] : null, "Avro.Json"),
+                "Avro.Json", pretty);
         });
 
         // ── THE THREE EDITS, and the format decides which is which. INSERT is the only edit that happens IN
         //    PLACE: a new block after the last one, ended with the FILE'S OWN sync marker, so nothing already
         //    written is decoded or rewritten. UPDATE and DELETE are REWRITES: a record is variable-length inside
         //    a compressed block with no index, so one cannot be replaced or removed where it sits. Both keep the
-        //    file's own HEADER byte for byte, which is the fact a script cannot get for itself (ReadContainer
+        //    file's own HEADER byte for byte, which is the fact a script cannot get for itself (Read
         //    answers records, never the schema or the codec), so a rewrite here needs no schema restated. ──
-        avroNs.AddMethod("AppendContainer", args =>
+        avroNs.AddMethod("Append", args =>
         {
-            var bytes = ContainerBytes(args.Length > 0 ? args[0] : null, "Avro.AppendContainer");
+            var bytes = ContainerBytes(args.Length > 0 ? args[0] : null, "Avro.Append");
             var appended = args.Length > 1 ? args[1] : null;
             if (appended is not System.Collections.IEnumerable rows)
                 throw new ScriptException(
-                    "Avro.AppendContainer: the records are a list or an array of values, not " +
+                    "Avro.Append: the records are a list or an array of values, not " +
                     $"'{AvroOptions.FriendlyNameOf(appended)}'. An appended block holds a sequence, so pass " +
-                    "[record] for one record, or use Avro.WriteContainer to write a whole file.");
-            return AvroContainer.Append(bytes, rows, _caseSensitive, "Avro.AppendContainer");
+                    "[record] for one record, or use Avro.Write to write a whole file.");
+            return AvroContainer.Append(bytes, rows, _caseSensitive, "Avro.Append");
         });
 
-        avroNs.AddMethod("UpdateContainer", args =>
+        avroNs.AddMethod("Update", args =>
         {
             var typed = args.Length > 3;
-            var bytes = ContainerBytes(args[typed ? 1 : 0], "Avro.UpdateContainer");
+            var bytes = ContainerBytes(args[typed ? 1 : 0], "Avro.Update");
             var predicate = args[typed ? 2 : 1];
             var transform = args[typed ? 3 : 2];
             if (!IsScriptCallable(predicate))
                 throw new ScriptException(
-                    "Avro.UpdateContainer: the predicate is the function that decides which records change, " +
+                    "Avro.Update: the predicate is the function that decides which records change, " +
                     $"not '{AvroOptions.FriendlyNameOf(predicate)}'.");
             if (!IsScriptCallable(transform))
                 throw new ScriptException(
-                    "Avro.UpdateContainer: the transform is the function that answers the new record, not " +
+                    "Avro.Update: the transform is the function that answers the new record, not " +
                     $"'{AvroOptions.FriendlyNameOf(transform)}'.");
             var self = Current ?? this;
             var records = AvroContainer.Read(bytes, typed ? args[0] : null, _caseSensitive,
-                "Avro.UpdateContainer");
+                "Avro.Update");
             var kept = new List<object?>(records.Count);
             foreach (var record in records)
                 kept.Add(IsTruthy(self.InvokeScriptCallback(predicate, [record]))
                     ? self.InvokeScriptCallback(transform, [record])
                     : record);
-            return AvroContainer.Rewrite(bytes, kept, _caseSensitive, "Avro.UpdateContainer");
+            return AvroContainer.Rewrite(bytes, kept, _caseSensitive, "Avro.Update");
         });
 
-        avroNs.AddMethod("DeleteContainer", args =>
+        avroNs.AddMethod("Delete", args =>
         {
             var typed = args.Length > 2;
-            var bytes = ContainerBytes(args[typed ? 1 : 0], "Avro.DeleteContainer");
+            var bytes = ContainerBytes(args[typed ? 1 : 0], "Avro.Delete");
             var predicate = args[typed ? 2 : 1];
             if (!IsScriptCallable(predicate))
                 throw new ScriptException(
-                    "Avro.DeleteContainer: the predicate is the function that decides which records are removed, " +
+                    "Avro.Delete: the predicate is the function that decides which records are removed, " +
                     $"not '{AvroOptions.FriendlyNameOf(predicate)}'.");
             var self = Current ?? this;
             var records = AvroContainer.Read(bytes, typed ? args[0] : null, _caseSensitive,
-                "Avro.DeleteContainer");
+                "Avro.Delete");
             var kept = new List<object?>(records.Count);
             foreach (var record in records)
                 if (!IsTruthy(self.InvokeScriptCallback(predicate, [record]))) kept.Add(record);
-            return AvroContainer.Rewrite(bytes, kept, _caseSensitive, "Avro.DeleteContainer");
+            return AvroContainer.Rewrite(bytes, kept, _caseSensitive, "Avro.Delete");
         });
 
         CurrentFrame.Scopes.Define("Avro", avroNs);

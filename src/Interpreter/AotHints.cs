@@ -204,13 +204,16 @@ internal partial class Interpreter
     [DynamicDependency(AvoidAotTrim, typeof(ScriptUnboxedList<>))]
     [DynamicDependency(AvoidAotTrim, typeof(ScriptTuple))]
     [DynamicDependency(AvoidAotTrim, typeof(ScriptLazyDeserializedList))]
-    // The LAZY AVRO READ (`Avro.ReadContainer("Iterable", data)`) is the same shape one reader over, and it needs the
+    // The LAZY AVRO READ (`Avro.Read("Iterable", data)`) is the same shape one reader over, and it needs the
     // same root for the same reason: `Count` and the record indexer are members a SCRIPT reads by NAME, so nothing
     // managed calls them and the trimmer drops them. Measured without this entry: avro_slc_store_test 5a passed on
     // the Debug build and the AOT publish answered "Property 'Count' not found on type Iterable" at that check,
     // because the value reports the DECLARATION it was read as (TypeAliases names it `DeclaredName`), which is what
     // made the refusal read as a missing member on the declaration rather than on the wrapper that holds it.
     [DynamicDependency(AvoidAotTrim, typeof(AvroLazyContainer))]
+    // The ITEM-BY-ITEM READER (`Avro.OpenReader(path)`) is the same shape one level down: `HasNext`/`ReadNext`,
+    // `Count`, `Blocks` and `Schema` are members a script reads BY NAME, so nothing managed calls them.
+    [DynamicDependency(AvoidAotTrim, typeof(AvroReader))]
     [DynamicDependency(AvoidAotTrim, typeof(MemBuffer))]
     [DynamicDependency(AvoidAotTrim, typeof(ScriptBoxedDictionary))]
     [DynamicDependency(AvoidAotTrim, typeof(ScriptUnboxedDictionary<,>))]

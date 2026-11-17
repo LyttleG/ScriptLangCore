@@ -302,7 +302,7 @@ internal partial class Interpreter
         // names is one an author wrote and can write back. `is LazyDeserializedList` still answers through the
         // registry alias, so nothing a script could ask for is lost.
         ScriptLazyDeserializedList lazyList => lazyList.DeclaredName,
-        // A container read LAZILY (`Avro.ReadContainer("Iterable", data)`) reports the name the read was asked
+        // A container read LAZILY (`Avro.Read("Iterable", data)`) reports the name the read was asked
         // for, the same rule as the lazy JSON read above and for the same reason: the value STANDS FOR that
         // declaration, and "Iterable" is a name an author wrote and can write back.
         AvroLazyContainer lazyContainer => lazyContainer.DeclaredName,

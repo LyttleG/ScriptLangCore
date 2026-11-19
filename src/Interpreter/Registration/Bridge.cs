@@ -194,10 +194,13 @@ internal partial class Interpreter
             return self.BridgeHandle(request);
         });
 
-        // ── the SCRIPT -> HOST door, in two shapes ────────────────────────────────────────────────────────────────
+        // ── the SCRIPT -> HOST door, in three shapes ──────────────────────────────────────────────────────────────
         // ONE ARGUMENT is the raw request document, which stays the escape hatch (a batch, a hand-built id, a verb the
-        // engine does not know). TWO ARGUMENTS are a verb and its parameters: the engine writes `v`, assigns an id and
-        // returns `r`, and an `ok:false` answer is thrown as a catchable error.
+        // engine does not know), and it may be written as TEXT or as an OBJECT whose members are the envelope's own:
+        // `Bridge.Call({ m: "add", p: { a: 20, b: 22 } })` is the SAME document as the equivalent text, because the
+        // object goes through the engine's one serializer and nothing is guessed about a member name. TWO ARGUMENTS
+        // are a verb and its parameters: the engine writes `v`, assigns an id and returns `r`, and an `ok:false`
+        // answer is thrown as a catchable error.
         bridgeNs.AddMethod("Call", args =>
         {
             var self = Current ?? this;
@@ -205,7 +208,9 @@ internal partial class Interpreter
                 return self.BridgeCallVerb("Call", verb, args[1], throwOnFailure: true);
             if (args.Length == 1 && args[0] is string request)
                 return self.BridgeCall(request);
-            throw new ScriptException("Bridge.Call expects a request document as text, or a verb and its optional parameters, as in Bridge.Call(\"customer.lookup\", { \"id\": 42 }).");
+            if (args.Length == 1 && IsBridgeDocument(args[0]))
+                return self.BridgeCall(SerializeToText(args[0]));
+            throw new ScriptException("Bridge.Call expects a request document as text or as an object, or a verb and its optional parameters, as in Bridge.Call(\"customer.lookup\", { \"id\": 42 }).");
         });
 
         // ── the SAME call, answering the whole envelope instead of r ─────────────────────────────────────────────
@@ -407,6 +412,14 @@ internal partial class Interpreter
         try { return BridgeServe(requestJson); }
         finally { _bridgeServing = false; }
     }
+
+    /// <summary>THE OBJECT FORM OF A REQUEST DOCUMENT, judged the way this file judges a dictionary everywhere else
+    /// (the verb form's parameters at <see cref="BridgeCallVerb"/> ask the same pair): the engine's own
+    /// <see cref="IScriptDictionary"/>, which is what a parsed document is, or any <c>System.Collections.IDictionary</c>,
+    /// which is what a <c>{ }</c> literal is. Stated once so a caller cannot be told "not a document" about a shape the
+    /// rest of the engine reads as one, and so the serializer is the only thing that decides what the text says.</summary>
+    private static bool IsBridgeDocument(object? value) =>
+        value is IScriptDictionary || value is System.Collections.IDictionary;
 
     /// <summary>THE RAW SCRIPT -> HOST DOOR: one request document in, the host's parsed envelope out. It keeps the
     /// caller's document untouched, including the id, which is why the verb form is built on it rather than beside

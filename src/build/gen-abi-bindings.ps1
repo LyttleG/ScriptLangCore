@@ -315,7 +315,373 @@ function New-PythonBindings {
     return ($out -join "`n") + "`n"
 }
 
-# ── the two blocks the embedding page generates ─────────────────────────────────────────────────────────────────────
+# ── the Java carrier ────────────────────────────────────────────────────────────────────────────────────────────────
+# slc_run_text_async -> runTextAsync, the name the wrapper carries. The MethodHandle keeps the ABI's own name, so a
+# host that needs a shape the wrapper does not offer still has the export by the name the manifest gives it.
+function Get-JavaWrapperName([string]$export) {
+    $parts = $export -split "_"
+    $name = $parts[1]
+    for ($i = 2; $i -lt $parts.Count; $i++) {
+        $name += $parts[$i].Substring(0, 1).ToUpperInvariant() + $parts[$i].Substring(1)
+    }
+    return $name
+}
+
+function Get-JavaType([string]$c) {
+    switch ($c) {
+        "int" { return "int" }
+        "int64_t" { return "long" }
+        # a Java String in, a MemorySegment out: the wrappers marshal the first and hand the second through untouched
+        "char*" { return "MemorySegment" }
+        "const char*" { return "MemorySegment" }
+        "void*" { return "MemorySegment" }
+        "const void*" { return "MemorySegment" }
+        default { throw "the manifest uses a C type this generator does not know: '$c'" }
+    }
+}
+
+function Get-JavaLayout([string]$c) {
+    switch ($c) {
+        "int" { return "ValueLayout.JAVA_INT" }
+        "int64_t" { return "ValueLayout.JAVA_LONG" }
+        "char*" { return "ValueLayout.ADDRESS" }
+        "const char*" { return "ValueLayout.ADDRESS" }
+        "void*" { return "ValueLayout.ADDRESS" }
+        "const void*" { return "ValueLayout.ADDRESS" }
+        default { throw "the manifest uses a C type this generator does not know: '$c'" }
+    }
+}
+
+function New-JavaBindings {
+    $out = New-Object System.Collections.Generic.List[string]
+    $q = [char]34
+    $out.Add("/* $provenance")
+    $out.Add(" *")
+    $out.Add(" * WHAT THIS IS: the carrier for a host written in Java, over the JDK's Foreign Function and Memory API (Panama).")
+    $out.Add(" * No JNI, no shim DLL, no third-party dependency, and no second runtime in the process: the engine's image is")
+    $out.Add(" * loaded by the OS and called through the same C ABI every other carrier speaks.")
+    $out.Add(" *")
+    $out.Add(" * HOW A HOST USES IT")
+    $out.Add(" *     try (ScriptLangCore engine = ScriptLangCore.load(Path.of(${q}ScriptLangCore.dll${q})))")
+    $out.Add(" *     {")
+    $out.Add(" *         System.out.println(engine.abiRevision() + ${q} ${q} + engine.version());")
+    $out.Add(' *         long session = engine.create("{\"home\":\"C:/Program Files/ScriptLangCore\"}");')
+    $out.Add(" *         engine.setOutput(session, (handle, channel, text) -> System.out.print(text));")
+    $out.Add(" *         engine.runText(session, ${q}print(1 + 1)${q}, null);")
+    $out.Add(" *         System.out.println(engine.lastResult(session));")
+    $out.Add(" *         engine.free(session);")
+    $out.Add(" *     }")
+    $out.Add(" *")
+    $out.Add(" * EVERY CALL OBEYS THE MANIFEST'S CONVENTIONS: strings are UTF-8 and NUL-terminated, an output goes into a")
+    $out.Add(" * caller-owned buffer following the snprintf convention (the wrappers do the two passes for you), and a status is")
+    $out.Add(" * the engine's exit code: 0 ok, 1 failed, 2 usage, 3 refused.")
+    $out.Add(" *")
+    $out.Add(" * TWO LAYERS, on purpose. Each export is a public MethodHandle carrying the ABI's own name, so a host that needs")
+    $out.Add(" * a buffer it owns, a NULL Java cannot express, or a call the wrappers do not shape can reach the export directly")
+    $out.Add(" * (engine.slc_run_text.invokeExact(...)). The wrappers are the convenience; the handles are the truth.")
+    $out.Add(" */")
+    $out.Add("import java.lang.foreign.Arena;")
+    $out.Add("import java.lang.foreign.FunctionDescriptor;")
+    $out.Add("import java.lang.foreign.Linker;")
+    $out.Add("import java.lang.foreign.MemorySegment;")
+    $out.Add("import java.lang.foreign.SymbolLookup;")
+    $out.Add("import java.lang.foreign.ValueLayout;")
+    $out.Add("import java.lang.invoke.MethodHandle;")
+    $out.Add("import java.lang.invoke.MethodHandles;")
+    $out.Add("import java.lang.invoke.MethodType;")
+    $out.Add("import java.nio.charset.StandardCharsets;")
+    $out.Add("import java.nio.file.Path;")
+    $out.Add("import java.util.ArrayList;")
+    $out.Add("import java.util.HashMap;")
+    $out.Add("import java.util.List;")
+    $out.Add("import java.util.Map;")
+    $out.Add("")
+    $out.Add("public final class ScriptLangCore implements AutoCloseable")
+    $out.Add("{")
+    $out.Add("    /** The ABI revision this carrier describes. A host compares it with abiRevision() before calling what it needs. */")
+    $out.Add("    public static final int ABI_REVISION = $abi;")
+    $out.Add("")
+    foreach ($cap in $capabilities) {
+        $constant = "CAP_" + $cap.name.ToUpperInvariant()
+        $out.Add("    /** Since ABI $($cap.since): $(Get-OneLine $cap.summary) */")
+        $out.Add("    public static final int $constant = 1 << $($cap.bit);")
+    }
+    $out.Add("")
+    $out.Add("    /** The line callback slc_set_output installs: channel 0 is the script's print, 1 is the engine's own log")
+    $out.Add("     *  lines. It runs on the thread that runs the script and the text is valid only for the duration of the")
+    $out.Add("     *  call, so a host that keeps it copies it, which is what this interface already does. */")
+    $out.Add("    @FunctionalInterface")
+    $out.Add("    public interface LineSink")
+    $out.Add("    {")
+    $out.Add("        void line(long handle, int channel, String utf8);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** The bridge callback slc_set_bridge installs: one request document in, one response document out. The")
+    $out.Add("     *  answer is the LENGTH the response needs, written with the same snprintf convention the engine's own")
+    $out.Add("     *  outputs use, so a host writes with answer(buffer, capacity, document) and returns its length. */")
+    $out.Add("    @FunctionalInterface")
+    $out.Add("    public interface BridgeSink")
+    $out.Add("    {")
+    $out.Add("        int request(long handle, String request, MemorySegment answer, int capacity);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    private static final FunctionDescriptor LINE_DESCRIPTOR = FunctionDescriptor.ofVoid(")
+    $out.Add("            ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS);")
+    $out.Add("    private static final FunctionDescriptor BRIDGE_DESCRIPTOR = FunctionDescriptor.of(")
+    $out.Add("            ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS,")
+    $out.Add("            ValueLayout.ADDRESS, ValueLayout.JAVA_INT);")
+    $out.Add("")
+    $out.Add("    /** The loaded image's lifetime, which is the PROCESS's. The engine's AOT runtime runs threads of its own, so")
+    $out.Add("     *  a host that unmapped the image would leave them running inside it (measured: an access violation), which")
+    $out.Add("     *  is why this arena is static and never closed. One per process, because loading one DLL twice answers the")
+    $out.Add("     *  same module anyway. */")
+    $out.Add("    private static final Arena IMAGE = Arena.ofShared();")
+    $out.Add("    /** One arena per handle SLOT, because one handle carries both callbacks: a single map per handle let a bridge")
+    $out.Add("     *  install release the output stub, which answered no lines and then jumped into freed memory. */")
+    $out.Add("    private final Map<Long, Arena> lineSinks = new HashMap<>();")
+    $out.Add("    private final Map<Long, Arena> bridgeSinks = new HashMap<>();")
+    $out.Add("")
+    foreach ($export in $exports) {
+        $out.Add("    /** $($export.returns) $($export.name)($((Get-Params $export | ForEach-Object { "$($_.type) $($_.name)" }) -join ', ')): $(Get-OneLine $export.summary) */")
+        $out.Add("    private MethodHandle $($export.name);")
+    }
+    $out.Add("")
+    $out.Add("    private ScriptLangCore() { }")
+    $out.Add("")
+    $out.Add("    /** Loads the engine and binds every export in the manifest, so a call that is made is a call this build answers. */")
+    $out.Add("    public static ScriptLangCore load(Path dll)")
+    $out.Add("    {")
+    $out.Add("        ScriptLangCore engine = new ScriptLangCore();")
+    $out.Add("        SymbolLookup lookup = SymbolLookup.libraryLookup(dll, IMAGE);")
+    foreach ($export in $exports) {
+        $descriptors = @((Get-JavaLayout $export.returns))
+        foreach ($p in (Get-Params $export)) { $descriptors += (Get-JavaLayout $p.type) }
+        $out.Add("        engine.$($export.name) = engine.downcall(lookup, ${q}$($export.name)${q}, FunctionDescriptor.of($($descriptors -join ', ')));")
+    }
+    $out.Add("        return engine;")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    public static ScriptLangCore load(String dll)")
+    $out.Add("    {")
+    $out.Add("        return load(Path.of(dll));")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("")
+    $out.Add("    private MethodHandle downcall(SymbolLookup lookup, String name, FunctionDescriptor descriptor)")
+    $out.Add("    {")
+    $out.Add("        return Linker.nativeLinker().downcallHandle(lookup.find(name).orElseThrow(() -> new IllegalStateException(")
+    $out.Add("                ${q}this ScriptLangCore.dll answers no '${q} + name + ${q}': it is older than ABI ${q} + ABI_REVISION)), descriptor);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** The names of the capability bits a mask answers, from slc_capabilities(), so a log line can say what THIS")
+    $out.Add("     *  build offers instead of a host hoping a family it needs is compiled in. */")
+    $out.Add("    public static List<String> capabilities(int mask)")
+    $out.Add("    {")
+    $out.Add("        List<String> names = new ArrayList<>();")
+    foreach ($cap in $capabilities) {
+        $constant = "CAP_" + $cap.name.ToUpperInvariant()
+        $out.Add("        if ((mask & $constant) != 0) names.add(${q}$($cap.name)${q});")
+    }
+    $out.Add("        return names;")
+    $out.Add("    }")
+    $out.Add("")
+    # THE WRAPPERS, one per export, skipping the three that carry lifecycle (set_output, set_bridge and free), which are
+    # emitted as fixed text below because a stub that must outlive the call is not a signature.
+    $special = @("slc_set_output", "slc_set_bridge", "slc_free")
+    foreach ($export in $exports) {
+        if ($special -contains [string]$export.name) { continue }
+        $returns = [string]$export.returns
+        # @() around it: a one-parameter export hands a scalar back, whose .Count is $null here, and the loop below
+        # would then emit a wrapper with no arguments at all
+        $params = @(Get-Params $export)
+        $buffer = Test-WritesIntoCallerBuffer $export
+        # a buffer-filling export answers its length twice: the wrapper turns that into the String it is for
+        $javaReturns = if ($buffer) { "String" } elseif ($returns -eq "int64_t") { "long" } else { "int" }
+        $signature = @()
+        $arguments = @()
+        $usesArena = $buffer
+        $skipNext = $false
+        for ($i = 0; $i -lt $params.Count; $i++) {
+            $p = $params[$i]
+            if ($skipNext) { $skipNext = $false; continue }
+            if ("$($p.dir)" -eq "out") { $skipNext = $true; continue }
+            $type = [string]$p.type
+            $name = [string]$p.name
+            if ($type -eq "char*" -or $type -eq "const char*") {
+                $usesArena = $true
+                $signature += "String $name"
+                $arguments += "utf8(arena, $name)"
+            } else {
+                $signature += "$(Get-JavaType $type) $name"
+                $arguments += $name
+            }
+        }
+        $out.Add("    /** $(Get-OneLine $export.summary)")
+        $out.Add("     *  Since ABI $($export.since). */")
+        $out.Add("    public $javaReturns $(Get-JavaWrapperName $export.name)($($signature -join ', '))")
+        $out.Add("    {")
+        $call = $arguments -join ', '
+        $cast = $javaReturns
+        if ($usesArena) {
+            $out.Add("        try (Arena arena = Arena.ofConfined())")
+            $out.Add("        {")
+            if ($buffer) {
+                # the two passes the snprintf convention asks for: the length first, then exactly that many bytes
+                $probe = if ($call) { "$call, MemorySegment.NULL, 0" } else { "MemorySegment.NULL, 0" }
+                $write = if ($call) { "$call, buffer, needed + 1" } else { "buffer, needed + 1" }
+                $out.Add("            int needed = (int) $($export.name).invokeExact($probe);")
+                $out.Add("            if (needed < 0) return ${q}${q};")
+                $out.Add("            MemorySegment buffer = arena.allocate(needed + 1L);")
+                $out.Add("            int wrote = (int) $($export.name).invokeExact($write);")
+                $out.Add("            return wrote < 0 ? ${q}${q} : buffer.getString(0, StandardCharsets.UTF_8);")
+            } else {
+                $out.Add("            return ($cast) $($export.name).invokeExact($call);")
+            }
+            $out.Add("        }")
+            $out.Add("        catch (Throwable failure) { throw rethrow(failure); }")
+        } else {
+            $out.Add("        try { return ($cast) $($export.name).invokeExact($call); }")
+            $out.Add("        catch (Throwable failure) { throw rethrow(failure); }")
+        }
+        $out.Add("    }")
+        $out.Add("")
+    }
+    # the fixed-text half: the three lifecycle members and the helpers every wrapper leans on
+    $out.Add("    /** Installs the host half of the output contract, or removes it when sink is null. The stub has to outlive")
+    $out.Add("     *  this call, so it is kept in an arena of its own until the next install for that handle or free/close. */")
+    $out.Add("    public int setOutput(long handle, LineSink sink)")
+    $out.Add("    {")
+    $out.Add("        return install(handle, slc_set_output, sink, true);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** Installs the host half of the bridge contract, or removes it when sink is null, under the same lifetime. */")
+    $out.Add("    public int setBridge(long handle, BridgeSink sink)")
+    $out.Add("    {")
+    $out.Add("        return install(handle, slc_set_bridge, sink, false);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    private int install(long handle, MethodHandle setter, Object sink, boolean line)")
+    $out.Add("    {")
+    $out.Add("        Arena lifetime = Arena.ofShared();")
+    $out.Add("        try")
+    $out.Add("        {")
+    $out.Add("            MemorySegment stub = sink == null ? MemorySegment.NULL : upcall(sink, line, lifetime);")
+    $out.Add("            int status = (int) setter.invokeExact(handle, stub, MemorySegment.NULL);")
+    $out.Add("            if (status != 0) { lifetime.close(); return status; }")
+    $out.Add("            Map<Long, Arena> slot = line ? lineSinks : bridgeSinks;")
+    $out.Add("            Arena previous = slot.put(handle, lifetime);")
+    $out.Add("            if (previous != null) previous.close();")
+    $out.Add("            return 0;")
+    $out.Add("        }")
+    $out.Add("        catch (Throwable failure) { lifetime.close(); throw rethrow(failure); }")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    private static MemorySegment upcall(Object sink, boolean line, Arena lifetime)")
+    $out.Add("            throws NoSuchMethodException, IllegalAccessException")
+    $out.Add("    {")
+    $out.Add("        MethodHandles.Lookup lookup = MethodHandles.lookup();")
+    $out.Add("        if (line)")
+    $out.Add("        {")
+    $out.Add("            MethodHandle target = MethodHandles.insertArguments(lookup.findStatic(ScriptLangCore.class, ${q}onLine${q},")
+    $out.Add("                    MethodType.methodType(void.class, LineSink.class, long.class, int.class,")
+    $out.Add("                            MemorySegment.class, MemorySegment.class)), 0, sink);")
+    $out.Add("            return Linker.nativeLinker().upcallStub(target, LINE_DESCRIPTOR, lifetime);")
+    $out.Add("        }")
+    $out.Add("        MethodHandle target = MethodHandles.insertArguments(lookup.findStatic(ScriptLangCore.class, ${q}onBridge${q},")
+    $out.Add("                MethodType.methodType(int.class, BridgeSink.class, long.class, MemorySegment.class,")
+    $out.Add("                        MemorySegment.class, MemorySegment.class, int.class)), 0, sink);")
+    $out.Add("        return Linker.nativeLinker().upcallStub(target, BRIDGE_DESCRIPTOR, lifetime);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /* An upcall that threw would unwind into the engine through no fault of its own, so a host failure is")
+    $out.Add("       swallowed here rather than taken out on the image. The bridge answers -1, which IS a refusal. */")
+    $out.Add("    private static void onLine(LineSink sink, long handle, int channel, MemorySegment utf8, MemorySegment user)")
+    $out.Add("    {")
+    $out.Add("        try { sink.line(handle, channel, text(utf8)); }")
+    $out.Add("        catch (Throwable ignored) { }")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    private static int onBridge(BridgeSink sink, long handle, MemorySegment user, MemorySegment request,")
+    $out.Add("            MemorySegment answer, int capacity)")
+    $out.Add("    {")
+    $out.Add("        try { return sink.request(handle, text(request), answer, capacity); }")
+    $out.Add("        catch (Throwable failure) { return -1; }")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** Releases the session, and with it any callback installed for it. 3 means a run is in flight, so the")
+    $out.Add("     *  handle stays valid and the free can be retried. */")
+    $out.Add("    public int free(long handle)")
+    $out.Add("    {")
+    $out.Add("        try")
+    $out.Add("        {")
+    $out.Add("            int status = (int) slc_free.invokeExact(handle);")
+    $out.Add("            if (status == 0) release(handle);")
+    $out.Add("            return status;")
+    $out.Add("        }")
+    $out.Add("        catch (Throwable failure) { throw rethrow(failure); }")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** Releases the callbacks this carrier installed, and nothing else. The IMAGE stays until the process ends,")
+    $out.Add("     *  for the reason its field gives: slc_free releases a SESSION, and a host that treats it as an unload is one")
+    $out.Add("     *  line away from an access violation. */")
+    $out.Add("    @Override")
+    $out.Add("    public void close()")
+    $out.Add("    {")
+    $out.Add("        for (Arena lifetime : lineSinks.values()) lifetime.close();")
+    $out.Add("        for (Arena lifetime : bridgeSinks.values()) lifetime.close();")
+    $out.Add("        lineSinks.clear();")
+    $out.Add("        bridgeSinks.clear();")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** Both slots of one handle, released together because a session's callbacks end with the session. */")
+    $out.Add("    private void release(long handle)")
+    $out.Add("    {")
+    $out.Add("        Arena line = lineSinks.remove(handle);")
+    $out.Add("        Arena bridge = bridgeSinks.remove(handle);")
+    $out.Add("        if (line != null) line.close();")
+    $out.Add("        if (bridge != null) bridge.close();")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** A Java String as the C ABI reads it: UTF-8, NUL-terminated, and NULL for null, which is what the engine")
+    $out.Add("     *  reads as ${q}no argument${q} (a script name, for one). */")
+    $out.Add("    private static MemorySegment utf8(Arena arena, String text)")
+    $out.Add("    {")
+    $out.Add("        return text == null ? MemorySegment.NULL : arena.allocateFrom(text, StandardCharsets.UTF_8);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** One of the engine's NUL-terminated UTF-8 strings, as a Java String. The segment's bounds are unknown to this")
+    $out.Add("     *  side, so the read is given the address space to find the terminator in. */")
+    $out.Add("    public static String text(MemorySegment utf8)")
+    $out.Add("    {")
+    $out.Add("        return utf8.equals(MemorySegment.NULL) ? ${q}${q} : utf8.reinterpret(Long.MAX_VALUE).getString(0, StandardCharsets.UTF_8);")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    /** Writes a bridge answer with the door's own convention and answers the length it needed, so a BridgeSink can")
+    $out.Add("     *  say ${q}return answer(buffer, capacity, document);${q} and be right at every capacity. */")
+    $out.Add("    public static int answer(MemorySegment buffer, int capacity, String document)")
+    $out.Add("    {")
+    $out.Add("        byte[] bytes = document.getBytes(StandardCharsets.UTF_8);")
+    $out.Add("        if (!buffer.equals(MemorySegment.NULL) && capacity > 0)")
+    $out.Add("        {")
+    $out.Add("            // an upcall hands its pointers over with NO bounds, so the capacity the engine stated is what the")
+    $out.Add("            // write is allowed to assume (a copy into the segment as received throws, which reads as a refusal)")
+    $out.Add("            MemorySegment target = buffer.reinterpret(capacity);")
+    $out.Add("            int count = Math.min(bytes.length, capacity - 1);")
+    $out.Add("            MemorySegment.copy(bytes, 0, target, ValueLayout.JAVA_BYTE, 0, count);")
+    $out.Add("            target.set(ValueLayout.JAVA_BYTE, count, (byte) 0);")
+    $out.Add("        }")
+    $out.Add("        return bytes.length;")
+    $out.Add("    }")
+    $out.Add("")
+    $out.Add("    private static RuntimeException rethrow(Throwable failure)")
+    $out.Add("    {")
+    $out.Add("        return failure instanceof RuntimeException runtime ? runtime : new IllegalStateException(failure);")
+    $out.Add("    }")
+    $out.Add("}")
+    return ($out -join "`n") + "`n"
+}
+
+
 # The page documents the ABI in prose around tables that are RENDERED from the manifest, so the page cannot describe a
 # call the library does not answer (it once listed a `slc_repl` export that never existed) or a signature that changed.
 function ConvertTo-HtmlText([string]$text) {
@@ -363,6 +729,7 @@ foreach ($entry in $generated) {
         "c" { $contents[$path] = New-CHeader }
         "csharp" { $contents[$path] = New-CSharpBindings }
         "python" { $contents[$path] = New-PythonBindings }
+        "java" { $contents[$path] = New-JavaBindings }
         "html-block" {
             $blocks.Add([pscustomobject]@{ Path = $path; Marker = [string]$entry.marker; Body = (Get-GeneratedBlock ([string]$entry.marker)) })
         }

@@ -4,9 +4,29 @@
 
 # ScriptLangCore
 
-An embedded scripting language interpreter for .NET 11, written in C# with full NativeAOT compatibility.
+A C#-like scripting language that ships as one native executable, and reaches the OS, the network, the database and the UI.
+Written in C# with full NativeAOT compatibility.
 
-**Author: Gérôme Guillemin.** ScriptLangCore, the language, the engine and this documentation are his work.
+> One executable. No runtime to install. A whole language inside.
+>
+> ScriptLangCore is a C#-like scripting language for .NET 11 that I have been building: a bytecode VM with a tree-walking fallback, bytecode bundles, COM automation, HTTP and TCP, SQLite and Avro, a Win32 UI toolkit, post-quantum crypto, and a C ABI for embedding.
+>
+> The part I care about most is not the syntax. It is that the thing ships as one native binary, and that a script can reach the machine: a window, an Excel instance, a database, a socket, a JSON API, or another process's runtime.
+>
+> A few facts from the repository:
+> - 500+ test suites, gated on the shipped NativeAOT binary, not on a development build
+> - every compiled body passes a verifier before it runs
+> - every source-less bundle is compared with its script, behaviour first
+> - a 15 KB C launcher drives the same engine through 24 exports
+> - a 2.5 GiB upload streams through a script route, chunk by chunk, and lands byte-identical
+>
+> Swipe through for the tour. If you embed scripting engines, build developer tools, or automate Windows from .NET, I would value your criticism.
+>
+> Repository link in the comments.
+>
+> #dotnet #csharp #scripting #compilers #nativeaot #opensource #softwareengineering
+
+> Author: **Gérôme Guillemin.** ScriptLangCore, the language, the engine and this documentation are his work.
 
 ## Pipeline
 

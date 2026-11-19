@@ -863,6 +863,24 @@ internal partial class Interpreter
                 : items.Contains(value);
         });
 
+        // Index
+        // C#'s `Enumerable.Index()` pairs every element with its position. Reported from a C# snippet whose
+        // `foreach (var (index, task) in tasks.Index())` is ordinary C# and answered "Method 'Index' not found on
+        // type string[] with 0 argument(s)": the member simply did not exist here. Each element is the engine's own
+        // destructurable pair (the shape a dictionary iteration already yields), so the destructuring foreach head
+        // binds position then element on BOTH engines, and `pair.Key` / `pair.Value` read the same two facts.
+        RegisterNative("Index", TokenType.Object, args =>
+        {
+            if (args.Length != 1)
+                throw new ScriptException("Index expects a collection.");
+
+            var indexed = new List<object?>();
+            var position = 0;
+            foreach (var item in GetItems(args[0]))
+                indexed.Add(new ScriptKeyValuePair(position++, item));
+            return indexed;
+        });
+
         // Zip
         RegisterNative("Zip", TokenType.Object, args =>
         {

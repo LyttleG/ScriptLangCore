@@ -134,5 +134,9 @@ internal static class LinqExtensions
 
         public object Zip(IEnumerable second, ScriptFunction resultSelector)
             => Interpret.InvokeNative("Zip", source, second, resultSelector);
+
+        // `tasks.Index()`: C#'s Enumerable.Index, each element paired with its position.
+        public object Index()
+            => Interpret.InvokeNative("Index", source);
     }
 }

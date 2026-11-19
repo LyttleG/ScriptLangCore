@@ -963,6 +963,19 @@ Check("Bridge.Call reaches the host bridge and answers its document",
 Check("the host callback received the request document, verb and all",
     bridgeRequests.Count == 1 && bridgeRequests[0].Contains("host.double"), string.Join(" ; ", bridgeRequests));
 
+// THE SAME DOOR, AS AN OBJECT: the raw document may be written as a script object whose members are the envelope's
+// own, which the engine serializes. The stub host answers by CONTENT, so an answer of 42 proves the object reached it
+// as the document the text form sends, and the recorded request shows it was serialized rather than stringified.
+lines.Clear();
+var hostObject = runText(bridgeSession, Utf8(
+    "var answer = Bridge.Call({ v: 1, id: \"s2\", m: \"host.double\", p: { n: 21 } });\n" +
+    "print(\"obj=\" + answer[\"ok\"] + \" n=\" + answer[\"r\"][\"n\"]);"), nint.Zero);
+Check("Bridge.Call takes the request document as an OBJECT and answers the host's document",
+    hostObject == 0 && lines.Contains("0|obj=True n=42"), string.Join(" ; ", lines));
+Check("the object form reaches the host as a serialized document, members and all",
+    bridgeRequests.Count == 2 && bridgeRequests[1].Contains("\"m\":\"host.double\"")
+        && bridgeRequests[1].Contains("\"p\":{\"n\":21}"), string.Join(" ; ", bridgeRequests));
+
 var served = runText(bridgeSession, Utf8(
     "Bridge.Serve(fun (req) {\n" +
     "    var verb = req.Verb;\n" +

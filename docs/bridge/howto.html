@@ -109,11 +109,11 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
 </head>
 <body>
 
-<h1>The Bridge: How To <small>one contract, five carriers</small></h1>
+<h1>The Bridge: How To <small>one contract, six carriers</small></h1>
 
 <p>Two programs that talk to each other cannot hand each other an object: a C host has no script dictionary, the engine cannot see a C struct, a Python host has no COM pointer, and a COM client has no UTF-8 buffer of its own. What crosses every one of those boundaries is UTF-8 text. The Bridge is therefore <strong>one request document in and one response document out, in both directions</strong>, and the object graph stays where it lives.</p>
 
-<p>This page covers the whole contract and the five carriers that were driven through it end to end: <a href="#c">C</a>, <a href="#csharp">C#</a>, <a href="#python">Python</a>, <a href="#powershell">PowerShell</a> and <a href="#com">COM</a>. Each section carries a complete sample and the one or two details that decide whether it works.</p>
+<p>This page covers the whole contract and the six carriers that were driven through it end to end: <a href="#c">C</a>, <a href="#csharp">C#</a>, <a href="#python">Python</a>, <a href="#powershell">PowerShell</a>, <a href="#java">Java</a> and <a href="#com">COM</a>. Each section carries a complete sample and the one or two details that decide whether it works.</p>
 
 <div class="toc">
   <a href="#what">What it is</a>
@@ -122,7 +122,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
   <a href="#refusals">The refusals</a>
   <a href="#failures">Two kinds of failure</a>
   <a href="#script">The script side</a>
-  <a href="#carriers">The five carriers</a>
+  <a href="#carriers">The six carriers</a>
   <a href="#depth">No re-entry, and threads</a>
   <a href="#wire">What travels</a>
   <a href="#pipeline">Paging a big result</a>
@@ -140,7 +140,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
   <tr><td><code>Bridge.Call(request)</code></td><td>The script to host door. Answers the host's response document <strong>already parsed</strong>, so a script reads <code>answer["r"]["n"]</code>.</td></tr>
 </table>
 
-<p>The carrier only decides how the document travels. A C host installs a callback with <code>slc_set_bridge</code> and drives the script with <code>slc_invoke</code>; a COM client reaches the script with one <code>Invoke</code> member; a .NET host that owns the interpreter sets one field. Swapping the carrier changes no script, which is the reason the contract exists as a contract rather than as four protocols that resemble each other.</p>
+<p>The carrier only decides how the document travels. A C host installs a callback with <code>slc_set_bridge</code> and drives the script with <code>slc_invoke</code>; a COM client reaches the script with one <code>Invoke</code> member; a .NET host that owns the interpreter sets one field. Swapping the carrier changes no script, which is the reason the contract exists as a contract rather than as six protocols that resemble each other.</p>
 
 <h2 id="envelope">The envelope</h2>
 <p>A request is a JSON object with four members. Two are required.</p>
@@ -224,8 +224,8 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
 <p><strong>A transport failure is not an answer.</strong> No such session, a session already running, a freed handle, a callback that could not be called: there is no document to parse, so the carrier says so in ITS OWN vocabulary and the reason goes to the carrier's error channel.</p>
 <table>
   <tr><th style="width:16%;">Carrier</th><th style="width:34%;">Contract failure</th><th>Transport failure</th></tr>
-  <tr><td>C, C#, Python, PowerShell</td><td>The document's own <code>ok:false</code>, a non-negative length</td><td><code>slc_invoke</code> answers a NEGATIVE status; the sentence is in <code>slc_last_error</code></td></tr>
-  <tr><td>the host half (C, C#, Python, PowerShell)</td><td>the host's own <code>ok:false</code> document</td><td>the callback answers a NEGATIVE length; the script catches the refusal at <code>Bridge.Call</code></td></tr>
+  <tr><td>C, C#, Python, PowerShell, Java</td><td>The document's own <code>ok:false</code>, a non-negative length</td><td><code>slc_invoke</code> answers a NEGATIVE status; the sentence is in <code>slc_last_error</code></td></tr>
+  <tr><td>the host half (C, C#, Python, PowerShell, Java)</td><td>the host's own <code>ok:false</code> document</td><td>the callback answers a NEGATIVE length; the script catches the refusal at <code>Bridge.Call</code></td></tr>
   <tr><td>COM</td><td>the document's own <code>ok:false</code>, and the HRESULT stays 0</td><td>the sentence in <code>LastError</code> (a freed object, a session already running), because a member has no status to answer</td></tr>
 </table>
 <p>Putting a sentence in a buffer the host parses as JSON is how a binding ends up reporting a parse error instead of the real problem. That is why a transport failure is never a document.</p>
@@ -276,7 +276,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
 
 <div class="note"><strong>A stub host is just a script.</strong> <code>Bridge.Handle</code> answers the same document every carrier receives, so the contract can be tested with no host technology at all. That is what <code>assets/language/repl/interop/bridge_contract_test.slc</code> does: it decides the version, the verb, the parameters object (including an explicit <code>null</code>), a handler being served, a re-entrant call and a handler calling the host while serving, a handler's own failure, a non-envelope answer, the answer's whole shape (exactly one of <code>r</code> or <code>e</code>, and the error's <code>code</code>, <code>message</code>, <code>origin</code>, <code>retryAfter</code> and <code>details</code>), a response that names somebody else's <code>id</code> and version, and the id echoed four ways (string, numeric, absent, null). It runs on both engines.</div>
 
-<h2 id="carriers">The five carriers</h2>
+<h2 id="carriers">The six carriers</h2>
 <p>Both directions are carried by the C ABI. COM carries the host to script direction. The table is the whole difference between them.</p>
 <table>
   <tr><th style="width:13%;">Carrier</th><th style="width:29%;">The host half (a script calls back)</th><th style="width:26%;">The script half (the host asks)</th><th>The one thing to get right</th></tr>
@@ -284,10 +284,11 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
   <tr><td>C#</td><td>the same, with a <code>[UnmanagedFunctionPointer(Cdecl)]</code> delegate</td><td>the same</td><td>keep the delegate alive for the session's lifetime</td></tr>
   <tr><td>Python</td><td>the same, with a <code>ctypes.CFUNCTYPE</code></td><td>the same</td><td>the buffer parameter is <code>c_void_p</code>, and write with <code>memmove</code></td></tr>
   <tr><td>PowerShell</td><td>the same, with COMPILED callbacks (<code>Add-Type</code>)</td><td>the same</td><td>a script block cannot be a callback, and a property read goes through <code>InvokeMember</code></td></tr>
+  <tr><td>Java</td><td>the same, with a <code>BridgeSink</code> upcall stub held in one arena per slot</td><td>the same</td><td>a JDK 22 or newer, <code>--enable-native-access=ALL-UNNAMED</code>, and an answer buffer with no bounds</td></tr>
   <tr><td>COM</td><td><span class="tag tag-no">not over COM</span> (<code>LastError</code> explains why a call could not be made, but no member installs a callback)</td><td><code>Invoke(requestJson)</code>, DISPID 8</td><td>the document IS the answer; <code>Invoke</code> does not write <code>LastResult</code></td></tr>
 </table>
 
-<div class="note">The published library is <strong>x64</strong> (PE32+). Every carrier needs a 64-bit host process: a 32-bit Python, PowerShell or Office gets "the specified module could not be found" or "class not registered", which reads like a missing install rather than a bitness mismatch.</div>
+<div class="note">The published library is <strong>x64</strong> (PE32+). Every carrier needs a 64-bit host process: a 32-bit Python, PowerShell, JVM or Office gets "the specified module could not be found" or "class not registered", which reads like a missing install rather than a bitness mismatch.</div>
 
 <h3 id="c">C</h3>
 <p>A C host links nothing from the engine: it resolves the exports by name at run time, which is what a host without an import library does. The generated header <code>bindings/ScriptLangCore.h</code> declares all of them; the sample below spells only the six it uses and is shipped as <code>bindings/bridge_host.c</code>, so it can be built and run against an installed engine instead of retyped.</p>
@@ -944,6 +945,74 @@ $null = $free.Invoke($session)</code></pre>
   <li><strong>Windows PowerShell 5.1 has no <code>NativeLibrary</code></strong>, which is why this sample goes through <code>LoadLibraryW</code> + <code>GetProcAddress</code> with <code>Add-Type</code>, not through a .NET API.</li>
 </ul>
 
+<h3 id="java">Java</h3>
+<p>A Java host reaches the same two exports through the JDK's Foreign Function and Memory API, so there is no JNI, no shim DLL and no second runtime in the process. The declarations are generated too: <code>bindings/ScriptLangCore.java</code> is rendered from <code>docs/embed/abi.json</code>, and it keeps two layers on purpose. Every export is a public <code>MethodHandle</code> under the ABI's own name, so a host that needs a buffer it owns, a NULL Java cannot express, or a call the typed methods do not shape can reach the export directly; the typed methods on top are the convenience, and they apply the same <code>snprintf</code> probe the other bindings do. The sample below is the two directions in one program. The carrier's own check is shipped as <code>bindings/JavaTest.java</code>: it runs the ten checks of <a href="#checking">Checking a carrier</a> plus every refusal below, ends with <code>JAVA BRIDGE OK</code>, and <code>src/build/java-check.sh</code> compiles and drives it against the published DLL.</p>
+
+<pre><code>// bridge_host.java: both directions over the C ABI, with the generated declarations beside it.
+//   javac -d classes ScriptLangCore.java bridge_host.java
+//   java --enable-native-access=ALL-UNNAMED -cp classes bridge_host "C:\Program Files\ScriptLangCore\bin"
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+public final class bridge_host
+{
+    public static void main(String[] args) throws Exception
+    {
+        Path home = Path.of(args[0]);
+        List&lt;String&gt; lines = new ArrayList&lt;&gt;();
+        List&lt;String&gt; requests = new ArrayList&lt;&gt;();
+
+        try (ScriptLangCore engine = ScriptLangCore.load(home.resolve("ScriptLangCore.dll")))
+        {
+            if ((engine.capabilities() &amp; ScriptLangCore.CAP_BRIDGE) == 0)
+            {
+                System.out.println("this build has no bridge");
+                return;
+            }
+
+            long session = engine.create("{\"home\":\"" + home.toAbsolutePath().toString().replace("\\", "\\\\") + "\"}");
+            engine.setOutput(session, (handle, channel, text) -&gt; lines.add(channel + "|" + text));
+
+            // THE HOST HALF: one request document in, one response document out. answer(...) writes it with the
+            // door's own convention and returns the length the engine must be told.
+            engine.setBridge(session, (handle, request, answer, capacity) -&gt; {
+                requests.add(request);
+                return ScriptLangCore.answer(answer, capacity, "{\"v\":1,\"ok\":true,\"r\":{\"name\":\"Ada\"}}");
+            });
+
+            // script -&gt; host
+            engine.runText(session, """
+                    var who = Bridge.Call('{"v":1,"id":"s1","m":"customer.lookup","p":{"id":42}}');
+                    print("customer: " + who["r"]["name"]);""", null);
+
+            // host -&gt; script
+            engine.runText(session, """
+                    Bridge.Serve(fun (req) {
+                        var verb = req.Verb;
+                        if (verb == "echo") { return req.Ok({ n: req.Parameters["n"] * 2 }); }
+                        return req.Fail("NoSuchVerb", "no " + verb);
+                    });""", null);
+
+            System.out.println(engine.invoke(session, "{\"v\":1,\"id\":\"h1\",\"m\":\"echo\",\"p\":{\"n\":21}}"));
+            System.out.println(engine.invoke(session, "{\"v\":1,\"id\":\"h2\",\"m\":\"nope\"}"));
+            System.out.println(lines);
+            System.out.println(requests.size() + " request(s) reached the host");
+            engine.free(session);
+        }
+    }
+}</code></pre>
+
+<h4>Details that decide whether it works</h4>
+<ul>
+  <li><strong><code>--enable-native-access=ALL-UNNAMED</code> is not optional.</strong> The Foreign Function and Memory API is a RESTRICTED API, so a JDK 24 or newer refuses every downcall without that flag, and the refusal reads as a broken library rather than as a missing permission. A JDK 22 or newer is required as well, because the API is final from 22.</li>
+  <li><strong>The answer buffer arrives with NO bounds.</strong> An upcall hands its pointer over as a bare address, so <code>ScriptLangCore.answer(buffer, capacity, document)</code> reinterprets it with the capacity the engine stated before writing. A copy into the segment as received throws, and the stub turns that into <code>-1</code>, which the engine reads as this host refusing.</li>
+  <li><strong>One arena per handle SLOT.</strong> A single arena per handle looks right and is not: installing the bridge released the output stub, so no lines were delivered and then the next line jumped into freed memory. The output slot and the bridge slot are released separately, by the next install, by <code>free</code> or by <code>close</code>.</li>
+  <li><strong><code>close()</code> releases the callbacks and nothing else.</strong> The image's arena is never closed, because the engine's AOT runtime has threads of its own, so unmapping the image would leave them running inside it. <code>slc_free</code> releases a SESSION too, not the library.</li>
+  <li><strong>A host exception does not cross the boundary.</strong> The stubs catch it and answer <code>-1</code>, the documented refusal, so a bug in a Java callback is a contract failure in the document rather than an unwind through the engine.</li>
+  <li><strong><code>engine.setBridge(session, null)</code></strong> takes the host half back, and then <code>Bridge.Call</code> says it has no host by name. A typed method answers <code>""</code> on a transport failure, so read <code>lastError(handle)</code> when an answer is empty.</li>
+</ul>
+
 <h3 id="com">COM</h3>
 <p>A COM client needs no declarations, no buffer and no handle: one ProgID, one member. <code>CreateObject("ScriptLangCore.Session")</code> loads this same <code>ScriptLangCore.dll</code> (the Embed configuration) into the client's own process, and since the server publishes no type library every call arrives as IDispatch: the member's name resolves to a DISPID, then one <code>Invoke</code> runs it, <code>RunText</code> being DISPID 2 and <code>Invoke</code> DISPID 8. The object holds ONE session, created on its first use on a thread the engine starts, and every member is a single job marshalled onto that thread. That is what ties the two verbs together: <code>RunText</code> runs a script in the session's interpreter, so the <code>Bridge.Serve</code> handler it installs is still there when <code>Invoke</code> posts one request document to the same interpreter, where the engine's dispatcher checks the envelope, calls the handler and rebuilds the answer with the caller's <code>id</code> echoed, so what returns is a document rather than whatever the handler happened to write. <a href="#com-workflow">How one call travels</a> is that path step by step, with the eight members and the three kinds of failure.</p>
 
@@ -1130,7 +1199,7 @@ while (true) {
 <p>The total barely moves while the slowest page moves by a factor of 55, which is the reason to page at all: the payload is the cost and the request is not. The same 100,000 rows split as a sqlite read (176 ms, or 142 ms through <code>Sqlite.QueryLazy</code>), building the per-row documents (about 470 ms), serializing the table (81 ms, 69 bytes a row) and parsing it back (181 ms); a request whose answer is small costs 16 microseconds, so the envelope disappears next to the rows. Two consequences: choose a page size for the latency and the memory you can afford rather than for throughput, and keep the row shape lean, because parallel columns serialize to 48 bytes a row where named objects take 69.</p>
 
 <h2 id="checking">Checking a carrier</h2>
-<p>Every one of the five carriers was driven through the SAME ten checks, so a difference between them is a difference in the carrier and not in what was asked of it:</p>
+<p>Every one of the six carriers was driven through the SAME ten checks, so a difference between them is a difference in the carrier and not in what was asked of it:</p>
 <ol>
   <li>the capability bit <code>0x200</code> says this build has the bridge, and <code>slc_abi_revision</code> is at least 6;</li>
   <li>a session is created;</li>
@@ -1150,6 +1219,7 @@ while (true) {
   <tr><td><code>assets/language/repl/interop/bridge_contract_test.slc</code></td><td>The contract itself, with a stub host that is just a script: the envelope, the version, the verb, the parameters object including an explicit null, the handler's own failure, a non-envelope answer, the answer's whole shape (exactly one of <code>r</code> or <code>e</code>, and the error's members), a handler calling the host while serving, and the id echoed four ways. Runs on both engines.</td></tr>
   <tr><td><code>assets/language/repl/interop/bridge_pipeline_test.slc</code></td><td>The contract as a data pipeline: a sqlite table walked page by page through <code>$next</code> and <code>$done</code>, a walk resumed from a cursor, the tail and a page that runs past the end, the same dump as one document, and three refusals answered as documents with the session still serving. Runs on both engines.</td></tr>
   <tr><td><code>bindings/BridgeTest.py</code></td><td>The Python carrier, shipped: the host half and the script half in one run, plus every refusal, and <code>PYTHON BRIDGE OK</code> as the answer a driver asserts.</td></tr>
+  <tr><td><code>bindings/JavaTest.java</code></td><td>The Java carrier, shipped: the ten checks above plus every refusal, driven by <code>src/build/java-check.sh</code> against the published DLL, and <code>JAVA BRIDGE OK</code> as the answer a driver asserts.</td></tr>
   <tr><td><code>assets/language/com/VbaBench.bas</code>, <code>VbaBench.xlsm</code></td><td>The VBA carrier as a workbook: <code>RunBridgeSelfTest</code> drives <code>Invoke</code> in nine named checks and returns <code>BRIDGE OK</code>; <code>bindings/vba-bench-check.ps1</code> rebuilds the workbook from the module and asserts both the verdict and that the text it carries is that file, line for line.</td></tr>
   <tr><td><code>src/build/embed-check.sh</code></td><td>The published DLL end to end, including the COM registration chain and the process-level legs.</td></tr>
   <tr><td><code>src/build/check-abi-manifest.sh</code></td><td><code>docs/embed/abi.json</code>, the exports marked <code>[UnmanagedCallersOnly]</code>, the capability bits and the generated bindings agree.</td></tr>
@@ -1158,7 +1228,8 @@ while (true) {
 <pre><code>bash src/build/embed-check.sh                       <span style="color:var(--text-dim);"># HARNESS OK, and the process legs</span>
 bash src/build/run-repl-tests.sh --filter bridge_contract_test --build aot
 bash src/build/check-abi-manifest.sh
-bash src/build/check-doc-bridge-c.sh</code></pre>
+bash src/build/check-doc-bridge-c.sh
+bash src/build/java-check.sh                        <span style="color:var(--text-dim);"># JAVA BRIDGE OK, against the published DLL</span></code></pre>
 
 <h2 id="trouble">Troubleshooting</h2>
 <table>
@@ -1170,6 +1241,7 @@ bash src/build/check-doc-bridge-c.sh</code></pre>
   <tr><td>Python: a length is answered but the document is missing</td><td>The buffer parameter was declared <code>c_char_p</code>. Declare <code>c_void_p</code> and write with <code>ctypes.memmove</code>.</td></tr>
   <tr><td>PowerShell: <code>PSInvalidOperationException</code> from <code>GetContextFromTLS</code></td><td>A script block was passed as a callback. Compile the callback with <code>Add-Type</code>.</td></tr>
   <tr><td>PowerShell: <code>$engine.Version</code> is empty</td><td>The PSObject adapter, not the server. Read through <code>InvokeMember(name, GetProperty, ...)</code>.</td></tr>
+  <tr><td>Java: the first native call is refused as a restricted method</td><td><code>--enable-native-access=ALL-UNNAMED</code> is missing, or the JDK is older than 22. <code>src/build/java-check.sh</code> refuses such a JDK by name before it compiles anything.</td></tr>
   <tr><td>COM: "class not registered", or "the specified module could not be found"</td><td>Not registered (run the installer, or <code>setup/com-register.reg</code>), or a 32-bit client against the x64 server.</td></tr>
   <tr><td><code>UnsupportedVersion</code></td><td><code>v</code> is missing or names another contract version. The message says which one was read; write <code>"v": 1</code>.</td></tr>
   <tr><td><code>NoHandler</code></td><td>The script has not called <code>Bridge.Serve</code>, or <code>Bridge.Serve(null)</code> stopped it.</td></tr>
@@ -1186,7 +1258,8 @@ bash src/build/check-doc-bridge-c.sh</code></pre>
   <tr><td><code>src/Host/ComServer.cs</code></td><td>The COM member <code>Invoke</code> (DISPID 8), forwarding to the same dispatcher.</td></tr>
   <tr><td><code>src/Host/EmbedCapabilities.cs</code></td><td>The capability bit <code>0x200</code> (<code>bridge</code>) and the revision this build answers.</td></tr>
   <tr><td><code>docs/embed/abi.json</code></td><td>The manifest both exports and the bit are generated from.</td></tr>
-  <tr><td><code>bindings/ScriptLangCore.h</code>, <code>.cs</code>, <code>scriptlangcore.py</code></td><td>The generated declarations, one set per carrier, so a sample does not retype a signature.</td></tr>
+  <tr><td><code>bindings/ScriptLangCore.h</code>, <code>.cs</code>, <code>scriptlangcore.py</code>, <code>ScriptLangCore.java</code></td><td>The generated declarations, one set per carrier, so a sample does not retype a signature.</td></tr>
+  <tr><td><code>src/build/java-check.sh</code></td><td>The Java carrier end to end: it compiles the generated declarations with <code>bindings/JavaTest.java</code> and runs them against the published DLL.</td></tr>
   <tr><td><code>assets/language/repl/interop/bridge_contract_test.slc</code></td><td>The contract's own suite, driven by a stub host that is a script.</td></tr>
   <tr><td><code>src/embed/Program.cs</code></td><td>The C ABI harness: a real function pointer in both directions, and the COM server's <code>Invoke</code>.</td></tr>
 </table>

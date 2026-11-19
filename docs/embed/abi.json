@@ -477,6 +477,10 @@
       "language": "python"
     },
     {
+      "path": "bindings/ScriptLangCore.java",
+      "language": "java"
+    },
+    {
       "path": "docs/embed/howto.html",
       "language": "html-block",
       "marker": "abi-table"

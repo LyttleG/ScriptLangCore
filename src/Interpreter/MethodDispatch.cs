@@ -1022,6 +1022,14 @@ internal partial class Interpreter
             var vmArgValues = args;
             if (hasParams || (method.IsVmShell && args.Length != method.Params.Count))
                 vmArgValues = NormalizeArgsForFlatCall(method, args, line, column);
+            // A LOADED method with MORE arguments than it declares: the tree DROPS the extras (its bind loop fills
+            // only the declared parameters), and a shell has no tree, so the VM must receive the same trimmed list or
+            // the call is refused as "bytecode-only". Measured: `k.One(7, 8)` for `One(int a)` answered 7 from the
+            // file and reported "Method 'One' is bytecode-only and cannot run on the tree walker" from its bundle,
+            // while an EXACT-arity call worked on both. A `params` tail is excluded, because
+            // NormalizeArgsForFlatCall assembles it into its own array.
+            if (method.IsVmShell && !hasParams && vmArgValues.Length > method.Params.Count)
+                vmArgValues = vmArgValues[..method.Params.Count];
             // ── VM fast path: pre-compiled method body (params + this as locals) ──
             // Task 4: `!method.HasYield`, a coroutine method (body contains yield) must NOT
             // flat-swap into YIELD bytecode here (the VM would return the first yielded value as
@@ -1280,6 +1288,9 @@ internal partial class Interpreter
             if ((smHasParams || (method.IsVmShell && args.Length != method.Params.Count))
                 && args.Length >= MinRequiredArgs(method))
                 vmArgValues = NormalizeArgsForFlatCall(method, args, line, column);
+            // The same trailing-extras rule as the class path states it: a shell has no tree to drop them.
+            if (method.IsVmShell && !smHasParams && vmArgValues.Length > method.Params.Count)
+                vmArgValues = vmArgValues[..method.Params.Count];
             // VM fast path for struct methods (operators, bound methods): mirrors the class
             // fast path, body pre-compiled, `this` as trailing local, VmFallback → tree below.
             // Task 4: `!method.HasYield`, coroutine methods must not flat-swap into YIELD

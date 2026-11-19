@@ -91,7 +91,7 @@ internal static class AppPaths
     internal static bool ProbeWritable(string dir)
     {
         if (string.IsNullOrEmpty(dir)) return false;
-        var probe = Path.Combine(dir, "_slc_write_probe_" + Guid.NewGuid().ToString("N"));
+        var probe = Path.Combine(dir, "_slc_write_probe_" + Guid.CreateVersion7().ToString("N"));
         try
         {
             Directory.CreateDirectory(dir);

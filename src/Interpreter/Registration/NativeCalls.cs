@@ -521,7 +521,14 @@ internal partial class Interpreter
             else
             {
                 var handle = ToNInt(args[0]);
-                if (handle != nint.Zero) NativeLibrary.Free(handle);
+                // THE SAME REFUSAL AS `DynamicLibrary.Free`, because this arm reaches `NativeLibrary.Free` without a
+                // library object: a script that read the plugin module's handle out of `GetModuleHandle` (or out of
+                // `lib.Handle`) can name it here directly, and that is the same unmap by another spelling.
+                if (PluginModules.IsDoored(handle))
+                    throw new ScriptException("FreeLibrary: that handle is the module a loaded plugin's door calls through, so it cannot be released while the plugin is loaded. Call Bridge.DetachPlugin() first: it releases a native plugin's module, and this handle dies with it.");
+                // ...and a handle the ENGINE already released is the same rule from the other side: the module a native
+                // plugin arrived in is gone after the detach, so naming its old handle here releases nothing.
+                if (handle != nint.Zero && !PluginModules.WasReleased(handle)) NativeLibrary.Free(handle);
             }
             return null;
         });

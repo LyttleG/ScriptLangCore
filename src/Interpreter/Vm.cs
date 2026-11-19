@@ -1425,6 +1425,16 @@ internal static class Vm
                             // answered "DispatchVtbl.ComNode").
                             var stringConcat = op == Opcode.ADD
                                 && (va is { K: 3, O: string } || vb is { K: 3, O: string });
+                            // D3: `X + string` where X's type declares op_Addition(X, string) is C#'s operator,
+                            // not Arith's concat, so it is delegated to the tree core, which asks the operator
+                            // (in that operand order) and falls back to concatenation when none applies. The
+                            // predicate is the SAME one the tree's concat arm asks, so no other pair is
+                            // delegated (a delegated concat would lose the engine's display rule).
+                            if (stringConcat && interp.ClrConcatOperatorApplies(va.ToObject(), vb.ToObject()))
+                            {
+                                Push(VmValue.From(interp.ApplyBinaryOpFromVm(va.ToObject(), vb.ToObject(), opTok, curLine, curCol)));
+                                break;
+                            }
                             // A BOXED char counts as unmodelled for ARITHMETIC even though the list above names
                             // char: a char promotes to int in C#, so `char.MaxValue + 1` is an int, and Arith's
                             // numeric tail answered a DOUBLE (crash_smallint_promote). The concat arm above still
@@ -1491,7 +1501,7 @@ internal static class Vm
                             // "is this a plain number", so a bool and a null take the same road.
                             if (!IsNumericValue(v))
                             {
-                                Push(VmValue.From(Interpreter.ApplyUnaryMinusFromVm(v.ToObject(), curLine, curCol)));
+                                Push(VmValue.From(interp.ApplyUnaryMinusFromVm(v.ToObject(), curLine, curCol)));
                                 break;
                             }
                             // A TAGGED integral keeps the PROMOTED type, which is what C# does with a unary
@@ -1536,7 +1546,7 @@ internal static class Vm
                             // refusal the argument still does not raise is a script's `try` that never fires.
                             if (!IsNumericValue(v))
                             {
-                                Push(VmValue.From(Interpreter.ApplyBitwiseComplementFromVm(v.ToObject(), curLine, curCol)));
+                                Push(VmValue.From(interp.ApplyBitwiseComplementFromVm(v.ToObject(), curLine, curCol)));
                                 break;
                             }
                             // C# promotes the operand first, so `~` of a sbyte/short/byte/ushort is an int, which is
@@ -1605,7 +1615,12 @@ internal static class Vm
                             // tree for a string, a DateTime and an enum member.
                             var orderingOfBoxed = op is Opcode.LT or Opcode.GT or Opcode.LE or Opcode.GE
                                                   && (ca.K == 3 || cb.K == 3);
-                            if (IsScriptInstanceValue(ca) || IsScriptInstanceValue(cb) || orderingOfBoxed)
+                            // ROUTE B: an equality on a CLR STRUCT is its own op_Equality, so it is delegated for
+                            // the same reason an ordering is (see IsClrOperatorOperand).
+                            var clrStructEquality = op is Opcode.EQ or Opcode.NE
+                                                    && (IsClrOperatorOperand(ca) || IsClrOperatorOperand(cb));
+                            if (IsScriptInstanceValue(ca) || IsScriptInstanceValue(cb) || orderingOfBoxed
+                                || clrStructEquality)
                             {
                                 var cmpTok = op switch
                                 {
@@ -2114,6 +2129,26 @@ internal static class Vm
                                 // the check reads the value rather than the kind.
                                 if (callee.O is string typeCallee && interp.ResolveTypeNameAsValue(typeCallee) is Type calledTypeValue)
                                     interp.RuntimeErrorFromVm($"Type '{calledTypeValue.Name}' is not a function.", curLine, curCol);
+
+                                // A RESOLVED VALUE THAT IS NOT CALLABLE is the tree's own sentence, raised here instead of
+                                // refusing the whole entry: `var notFn = 5; notFn(1);` answered "'Int32' is not a function"
+                                // from a file and "stopped part-way through its compiled body" from its bundle (measured:
+                                // `call_position_test` stops at its eleventh construct, a local holding a number). The
+                                // callee arrives as the NAME in a string, so the name is resolved FIRST: a name that
+                                // resolves to nothing keeps the bail below, because the tree's sentence there is
+                                // "Undefined variable", which needs the scope walk this arm does not have.
+                                // A `FuncDecl` and a `ClassInfo` are CALLABLE to the tree's own invocation arm even though
+                                // `IsScriptCallable` does not list them (a declaration used as a value is a static method,
+                                // and a class name is a static receiver), so raising for them would refuse a working
+                                // call: measured, `generic_struct_test`'s source leg answered "'FuncDecl' is not a
+                                // function" at its L33 call once this arm existed.
+                                var calleeValue = callee.O is string calleeText
+                                    ? interp.ResolveGlobalValue(calleeText)
+                                    : callee.O;
+                                if (calleeValue is not VmFallback
+                                    and not (FuncDecl or ClassInfo)
+                                    && !Interpreter.IsScriptCallable(calleeValue))
+                                    interp.RuntimeErrorFromVm($"'{(calleeValue?.GetType().Name ?? "null")}' is not a function.", curLine, curCol);
 
                                 // Fallback: abort to the tree, VmFallback returned (not pushed) so
                                 // TryExecuteVmBody re-runs this function tree-walked, which raises the
@@ -3955,6 +3990,28 @@ internal static class Vm
                     case Opcode.INC:
                         {
                             int vi = BytecodeReader.U8(code, ref ip);
+                            var cur = locals[vi];
+                            // A ref/capture slot holds a RefCell, which LOAD_VAR derefs. INC/DEC must update the
+                            // VALUE the cell holds, not replace the cell (the tree's ResolveTarget writes through
+                            // its slot the same way). Without this a renewed/captured local reached ApplyBinaryOp
+                            // as a RefCell: "Cannot convert 'RefCell' to number".
+                            if (cur.O is RefCell cell)
+                            {
+                                var next = VmValue.From(interp.ApplyIncDecFromVm(cell.Get(), true, curLine, curCol));
+                                cell.Set(next.ToObject());
+                                Push(next);
+                                break;
+                            }
+                            // A BOXED operand (a CLR struct or class) is the tree's to increment: its numeric
+                            // fast path would read a long payload the value does not have. The interpreter picks
+                            // op_Increment/op_Decrement, which is C#'s rule and not `+ 1`.
+                            if (cur.K == 3)
+                            {
+                                var boxed = VmValue.From(interp.ApplyIncDecFromVm(cur.ToObject(), true, curLine, curCol));
+                                locals[vi] = boxed;
+                                Push(boxed);
+                                break;
+                            }
                             var nv = new VmValue(locals[vi].L + 1);
                             locals[vi] = nv;
                             Push(nv);
@@ -3963,6 +4020,21 @@ internal static class Vm
                     case Opcode.DEC:
                         {
                             int vi = BytecodeReader.U8(code, ref ip);
+                            var cur = locals[vi];
+                            if (cur.O is RefCell cell)
+                            {
+                                var next = VmValue.From(interp.ApplyIncDecFromVm(cell.Get(), false, curLine, curCol));
+                                cell.Set(next.ToObject());
+                                Push(next);
+                                break;
+                            }
+                            if (cur.K == 3)
+                            {
+                                var boxed = VmValue.From(interp.ApplyIncDecFromVm(cur.ToObject(), false, curLine, curCol));
+                                locals[vi] = boxed;
+                                Push(boxed);
+                                break;
+                            }
                             var nv = new VmValue(locals[vi].L - 1);
                             locals[vi] = nv;
                             Push(nv);
@@ -3971,6 +4043,14 @@ internal static class Vm
                     case Opcode.NOT:
                         {
                             var a = Pop();
+                            // A CLR type that declares op_LogicalNot answers `!` (C#'s own operator); every
+                            // other operand keeps the VM's truthiness test, which is the tree's rule too. The
+                            // gate is the interpreter's, so the same type answers alike on both legs.
+                            if (IsClrOperatorOperand(a))
+                            {
+                                Push(VmValue.From(interp.ApplyLogicalNotFromVm(a.ToObject(), curLine, curCol)));
+                                break;
+                            }
                             Push(new VmValue(!IsTruthyV(a)));
                             break;
                         }
@@ -5575,6 +5655,15 @@ internal static class Vm
     private static bool IsScriptInstanceValue(VmValue v)
         => v.K == 3 && v.O is ClassInstance or StructInstance;
 
+    /// <summary>True when the operand is a CLR STRUCT whose own operator the interpreter must resolve (route B):
+    /// on C#'s rules `==` for such a value IS its op_Equality, and the VM's Compare answers the engine's value
+    /// equality instead. Measured with a user struct whose op_Equality ignores a field: the compiled leg said
+    /// False where the tree said True, so an equality with such an operand is delegated exactly as an ORDERING
+    /// already was. A string, a null, a DateTime and an enum member stay on Compare, so no common equality pays
+    /// a call (Interpreter.IsClrOperatorOperand states the exclusion list).</summary>
+    private static bool IsClrOperatorOperand(VmValue v)
+        => v.K == 3 && v.O is not null && Interpreter.IsClrOperatorOperand(v.O.GetType());
+
     /// <summary>True when the operand is a PLAIN NUMBER, i.e. one the arithmetic arms below can read
     /// themselves. Everything else (a script class or struct, a CLR ENUM member, a bool, a string, a null) is
     /// the INTERPRETER's to resolve, which is the rule the two bitwise arms got wrong:
@@ -5702,6 +5791,7 @@ internal static class Vm
             double d => Math.Abs(d) > Interpreter.Epsilon,
             float f => Math.Abs(f) > Interpreter.Epsilon,
             decimal m => m != 0m,
+            System.Numerics.BigInteger big => !big.IsZero,
             _ => true
         }
     };

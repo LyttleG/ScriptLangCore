@@ -73,6 +73,14 @@ internal partial class Interpreter
         public void Free()
         {
             if (_freed) return;                 // idempotent: a second free must not double-release
+            // THE ENGINE'S OWN MODULE IS NOT A SCRIPT'S TO RELEASE. Windows hands back ONE module per file whichever
+            // call asked for it, and this engine's `LoadLibrary` reuses a module that is already in the process without
+            // taking a reference of its own, so a script's load-then-free of the file a PLUGIN arrived in dropped the
+            // reference the loader held and unmapped a live door (measured: 0xC0000005 inside `LoadedJitPlugin.Dispatch`
+            // on the Debug build, SIGSEGV on the AOT one). Refusing by name is the only safe answer: the pointers the
+            // door calls through are inside that image, and a script cannot put them back.
+            if (PluginModules.IsDoored(_handle))
+                throw new ScriptException($"Library '{Name}' is the module a loaded plugin's door calls through, so it cannot be freed while that plugin is loaded: the next Bridge.Call would run into memory the loader has taken away. Call Bridge.DetachPlugin() first: it releases a native plugin's module, and this handle dies with it, so there is nothing left for you to free.");
             _freed = true;
             _functions.Clear();                 // the pointers in here died with the module
             _ordinals.Clear();
@@ -83,7 +91,13 @@ internal partial class Interpreter
             // treats as "no module".
             var releasing = _handle;
             _handle = nint.Zero;
-            if (releasing != nint.Zero)
+            // A HANDLE THE ENGINE ALREADY RELEASED NAMES NOTHING. `Bridge.DetachPlugin` frees a native plugin's module, and
+            // a script may well hold a library for that same file (the door's own path is the easiest handle to get), so
+            // its `Free` arrives here with a module that is gone: calling `FreeLibrary` on it is a double free, which the
+            // loader answers with an exception on the AOT build and with a plain failure on the JIT one. Marking it freed
+            // and releasing nothing is the honest reading of "this handle is dead", and it is what keeps a detach from
+            // leaving a warning at the end of every run that held one.
+            if (releasing != nint.Zero && !PluginModules.WasReleased(releasing))
                 NativeLibrary.Free(releasing);
         }
 

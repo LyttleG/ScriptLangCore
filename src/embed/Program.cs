@@ -626,7 +626,7 @@ if (hasEngineExe)
 // a few that must NOT be owned (an app's own flag, a bare word, a path). A flag added to `Program.EngineArguments` and
 // not to this list would let a packaged app swallow an engine flag.
 var ownsFn = Export<MainOwnsFn>(AbiExports.MainOwns);
-var owned = new[] { "--mcp", "--mcp-bc", "--repl", "--dump-bytecode", "--compile" };
+var owned = new[] { "--mcp", "--mcp-bc", "--repl", "--dump-bytecode", "--compile", "--plugin" };
 var notOwned = new[] { "--verbose", "alpha", "app.slc", "", "--COMPILE" };
 var ownedMisses = owned.Where(f => ownsFn(Utf8(f)) != 1).ToArray();
 var notOwnedLeaks = notOwned.Where(f => ownsFn(Utf8(f)) != 0).ToArray();
@@ -901,9 +901,9 @@ Check("Eval accepts a TYPED by-reference argument (VT_I4|VT_BYREF)",
 // called with one request document; a CONTRACT failure must travel INSIDE the document, never as an HRESULT.
 InvokeMember(DispIdOf("RunText"),
     "Bridge.Serve(fun (req) {\n"
-    + "    var verb = \"\" + req[\"m\"];\n"
-    + "    if (verb == \"echo\") { return Bridge.Ok(req[\"id\"], { n: req[\"p\"][\"n\"] * 2 }); }\n"
-    + "    return Bridge.Fail(req[\"id\"], \"NoSuchVerb\", \"no \" + verb);\n"
+    + "    var verb = req.Verb;\n"
+    + "    if (verb == \"echo\") { return Bridge.Ok(req.Id, { n: req.Parameters[\"n\"] * 2 }); }\n"
+    + "    return Bridge.Fail(req.Id, \"NoSuchVerb\", \"no \" + verb);\n"
     + "});");
 var (invoked, invokeHr) = InvokeMember(DispIdOf("Invoke"), "{\"v\":1,\"id\":\"c1\",\"m\":\"echo\",\"p\":{\"n\":21}}");
 Check("Invoke serves a verb over IDispatch, doubling 21 and echoing the id",
@@ -965,10 +965,10 @@ Check("the host callback received the request document, verb and all",
 
 var served = runText(bridgeSession, Utf8(
     "Bridge.Serve(fun (req) {\n" +
-    "    var verb = \"\" + req[\"m\"];\n" +
-    "    if (verb == \"echo\") { return Bridge.Ok(req[\"id\"], { n: req[\"p\"][\"n\"] * 2 }); }\n" +
+    "    var verb = req.Verb;\n" +
+    "    if (verb == \"echo\") { return Bridge.Ok(req.Id, { n: req.Parameters[\"n\"] * 2 }); }\n" +
     "    if (verb == \"boom\") { throw \"bridge boom\"; }\n" +
-    "    return Bridge.Fail(req[\"id\"], \"NoSuchVerb\", \"no \" + verb);\n" +
+    "    return Bridge.Fail(req.Id, \"NoSuchVerb\", \"no \" + verb);\n" +
     "});"), nint.Zero);
 Check("a script serves a verb", served == 0, SessionError(bridgeSession));
 

@@ -147,6 +147,7 @@ pre:hover .copy-btn { opacity: 1; }
 <li><a href="#packaging">Packaging a script into one exe</a></li>
 <li><a href="#launcher">The launcher</a></li>
 <li><a href="#managed">Embedding from C# and .NET</a></li>
+<li><a href="#jitplugins">Reaching JIT code from an AOT host</a></li>
 <li><a href="#sqlite">SQLite as a third door</a></li>
 <li><a href="#hosts">Hosts that are not C: Python, PowerShell, bash</a></li>
 <li><a href="#vba">Driving it from Excel and VBA</a></li>
@@ -616,6 +617,186 @@ delegate void LineCb(long handle, int channel, IntPtr utf8, IntPtr user);</code>
 <p>The full working host is <code>src/embed/Program.cs</code> in this repository: about sixty checks that exercise every export, including <code>slc_main</code>, the bytes verb, cancellation and the free-while-running refusal. When a question is not answered on this page, that file is the reference.</p>
 
 <div class="note"><strong>A session is per host, and the free matters.</strong> <code>slc_create</code> hands back a handle and <code>slc_free</code> releases the session, its interpreter and its feeds; a host that creates one session for its lifetime and frees it at shutdown has nothing else to do. Handles are never reused, so a stale one answers a refusal naming it instead of reaching another session, and <code>slc_free</code> refuses while a run is in flight rather than abandoning it mid-statement.</div>
+<h2 id="jitplugins">Reaching JIT code from an AOT host</h2>
+
+<p>A NativeAOT process cannot host IL: the runtime that would JIT it is not in the image, and <code>LoadAssembly</code> is refused on the shipped build for that reason. It can still reach JIT code the supported way, by starting a second CoreCLR for code that declares its own framework. The loader is <code>src/Host/JitPlugins/</code>, it is HOST side (nothing a script can call opens a runtime), and <code>bash src/build/jitplugin-check.sh</code> pins it with fourteen checks over the LOADER (a fixture written as a third party would write one, plus an AOT host that loads it) and four more over the COMPOSITION, measured from a script's side.</p>
+
+<p>The chain is four calls: <code>get_hostfxr_path</code> (from <code>nethost.dll</code>, which you deploy beside your host) finds hostfxr, <code>hostfxr_initialize_for_runtime_config</code> starts a runtime for the PLUGIN'S OWN <code>runtimeconfig.json</code>, <code>hostfxr_get_runtime_delegate(5)</code> hands back the assembly loader, and <code>load_assembly_and_get_function_pointer</code> resolves one entry point named <code>PluginInit</code>. The plugin fills a table:</p>
+
+<pre><code>struct PluginExports
+{
+    uint Abi;          // the contract version the plugin implements
+    uint Size;         // sizeof of the table as the plugin sees it
+    Ping;              // a typed slot: identity, with no document
+    Invoke;            // the verb door: request JSON in, answer JSON out
+};</code></pre>
+
+<p>The two version fields come FIRST on purpose: they are what lets a host refuse a plugin it does not understand BY NAME (<code>plugin speaks abi 1, this host speaks 2</code>, <code>plugin filled 24 byte(s) of the table, this host needs 40</code>) instead of reading past what the plugin wrote. The door is the extensible half: a plugin adds a verb without the host learning anything, and its answer is the SAME envelope the <a href="#bridge">Bridge</a> already uses on every other carrier (<code>{"v":1,"ok":true,"r":...}</code>, or <code>{"ok":false,"e":{"code":...,"message":...}}</code>), so one reader serves both.</p>
+
+<p>Two conventions are the whole boundary, and both are inherited from the engine's own C ABI rather than invented. The REQUEST is NUL-terminated UTF-8 that the plugin reads during the call and no longer. The ANSWER is length-delimited: the call returns the bytes it needs, writes at most <code>capacity</code> of them, and answers the same length when <code>capacity</code> is 0, so a host sizes its buffer with one probe and then reads exactly the length it got back. A negative return is a refusal, never a length.</p>
+
+<h3>The plugin, in C#</h3>
+
+<p>The whole plugin is one class library: no reference to the engine, its own copy of the table, and one catch-all so that nothing throws across an entry point. This is the fixture this repository pins, condensed to the verbs the sample below calls:</p>
+
+<pre><code>using System.Runtime.InteropServices;
+using System.Text;
+
+namespace JitPluginFixture;
+
+// The table restated here on purpose: the LAYOUT is the contract, not a shared C# type.
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct Exports
+{
+    public uint Abi;
+    public uint Size;
+    public delegate* unmanaged&lt;byte*, int, int&gt; Ping;
+    public delegate* unmanaged&lt;byte*, byte*, int, int&gt; Invoke;
+}
+
+public static unsafe class Entry
+{
+    const string Identity = "JitPluginFixture abi 1";
+
+    // Public, static and [UnmanagedCallersOnly] are the three things
+    // load_assembly_and_get_function_pointer(UNMANAGEDCALLERSONLY_METHOD) requires.
+    [UnmanagedCallersOnly]
+    public static int PluginInit(Exports* table)
+    {
+        table-&gt;Abi = 1;
+        table-&gt;Size = (uint)sizeof(Exports);
+        table-&gt;Ping = &amp;Ping;
+        table-&gt;Invoke = &amp;Invoke;
+        return 0;
+    }
+
+    [UnmanagedCallersOnly]
+    static int Ping(byte* answer, int capacity) =&gt; Write(Identity, answer, capacity);
+
+    // ONE catch-all: a plugin failure is an envelope, never an exception the host cannot survive.
+    [UnmanagedCallersOnly]
+    static int Invoke(byte* request, byte* answer, int capacity)
+    {
+        string reply;
+        try { reply = Answer(Marshal.PtrToStringUTF8((nint)request) ?? ""); }
+        catch (Exception ex) { reply = Failure("PluginFailed", ex.GetType().Name); }
+        return Write(reply, answer, capacity);
+    }
+
+    static string Answer(string request)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(request);
+        var root = document.RootElement;
+        var verb = root.TryGetProperty("m", out var m) ? m.GetString() ?? "" : "";
+        var p = root.TryGetProperty("p", out var value) ? value : default;
+        int a = Number(p, "a"), b = Number(p, "b");
+        return verb switch
+        {
+            "add"  =&gt; Ok(a + b),
+            "echo" =&gt; Ok($"{verb}:{a}/{b}"),
+            _      =&gt; Failure("UnknownVerb", $"this plugin serves add and echo, not '{verb}'"),
+        };
+    }
+
+    static int Number(System.Text.Json.JsonElement p, string name)
+        =&gt; p.ValueKind == System.Text.Json.JsonValueKind.Object
+           &amp;&amp; p.TryGetProperty(name, out var v)
+           &amp;&amp; v.ValueKind == System.Text.Json.JsonValueKind.Number
+           &amp;&amp; v.TryGetInt32(out var n) ? n : 0;
+
+    static string Ok(object result)
+        =&gt; $"{{\"v\":1,\"ok\":true,\"r\":{System.Text.Json.JsonSerializer.Serialize(result)}}}";
+
+    static string Failure(string code, string message)
+    {
+        var c = System.Text.Json.JsonSerializer.Serialize(code);
+        var m = System.Text.Json.JsonSerializer.Serialize(message);
+        return $"{{\"v\":1,\"ok\":false,\"e\":{{\"code\":{c},\"message\":{m}}}}}";
+    }
+
+    // The snprintf convention: answer the length needed, write at most `capacity`.
+    static int Write(string text, byte* answer, int capacity)
+    {
+        var utf8 = Encoding.UTF8.GetBytes(text);
+        if (answer is null || capacity &lt; utf8.Length) return utf8.Length;
+        for (int i = 0; i &lt; utf8.Length; i++) answer[i] = utf8[i];
+        return utf8.Length;
+    }
+}</code></pre>
+
+<p>The complete fixture (<code>src/jitplugins/Fixture/Fixture.cs</code>) adds the verbs the harness pins: a long answer, a UTF-8 answer, a verb that throws on purpose, a non-envelope answer, and two envelopes that contradict themselves. A plugin is an ordinary <code>net11.0</code> class library with <code>AllowUnsafeBlocks</code>; build it with <code>dotnet build -c Release</code>, and deploy its DLL WITH a <code>.runtimeconfig.json</code>, because that file is what gives the plugin its own framework and roll-forward. A class library build writes none of its own, which is why the fixture's is hand-written: it names <code>Microsoft.NETCore.App</code> 11.0.0 with <code>rollForward: latestMajor</code>, so that version is a floor and a newer runtime on the machine runs the plugin without a rebuild.</p>
+
+<div class="note"><strong>On Windows the hostfxr and nethost strings are not UTF-8.</strong> Those headers declare every string with <code>char_t</code>, which is <code>wchar_t</code> there: a path passed as UTF-8 arrives as interleaved letters and NULs and the runtime answers that the <code>runtimeconfig.json</code> does not exist, and <code>get_hostfxr_path</code> read as UTF-8 answers <code>"C"</code>. The DOOR's payload is UTF-8 on every platform, and both sides live in one file (<code>NativeChar</code>) so the two cannot be confused. Two more numbers to know: <code>get_hostfxr_path</code> reports the size it needs by failing with <code>0x80008098</code>, and the delegate kind for <code>load_assembly_and_get_function_pointer</code> is <code>5</code>, because that enum starts at zero. Finally, the type name must be assembly-qualified (<code>Namespace.Type, AssemblyName</code>): this route answers <code>0x80131522</code> for a bare name, which is why the loader refuses that form itself with a sentence that names the one to write.</div>
+
+<div class="note"><strong>What it costs, and what it cannot do.</strong> Starting the second runtime costs about 5 MB of private bytes, and NOTHING unloads that runtime: a MANAGED plugin lives as long as the process, because <code>hostfxr_close</code> leaves coreclr loaded and its entry points working. A NATIVE plugin is the other case and it is the loader that decides: that one is a plain DLL <code>LoadLibrary</code> put here, so <code>Bridge.DetachPlugin()</code> releases the module and its file can be deleted or replaced afterwards. Either way the plugin runs in your address space, with your privileges and your GC, so it is not a sandbox, and a plugin that throws across its own entry point ends the whole process: a fixture verb that throws is pinned in the harness, and its failure arrives as an envelope only because the plugin catches it itself. A plugin that must be stoppable, or must not be trusted, belongs in a CHILD PROCESS. It also runs on the thread that calls it, so the host's stack size and apartment decide what it can do: an MTA thread blocks COM, and a 1 MB host thread refused the engine's first re-entry in an earlier measurement.</div>
+
+<h3>Wiring it into a session</h3>
+
+<p>The loader is HOST side, so a plugin answers a program. A SCRIPT reaches it through the bridge the engine already has, and the seam is one statement: <code>Bridge.Call(request)</code> asks the session's <code>HostBridge</code>, which is the plugin's own door, and the envelope the plugin answers comes back as the parsed dictionary a script reads. Two ways to install that door:</p>
+
+<pre><code>// a .NET host, on the interpreter the script runs on
+interpreter.HostBridge = plugin.Dispatch;</code></pre>
+
+<pre><code># the command line, which needs no host code at all
+ScriptLangCore.exe --plugin JitPluginFixture.dll JitPluginFixture.Entry app.slc</code></pre>
+
+<p>and then the script asks for a verb. The calling side has two spellings, and the names say what comes back: <code>Bridge.Call(verb, params)</code> answers the plugin's <code>r</code> and throws a catchable error on <code>ok:false</code>, while <code>Bridge.CallEnvelope(verb, params)</code> answers the WHOLE envelope as a typed <code>BridgeEnvelope</code> (<code>Ok</code> is the verdict, <code>Value</code> the <code>r</code>, <code>Error</code> a <code>BridgeError</code> carrying <code>Code</code> and <code>Message</code>) and never throws for a verb call: a host's refusal and a call that cannot reach a host (the code <code>NoHost</code>) are both envelopes, which is why a caller needs no <code>try</code>. Neither builds a document: the engine writes <code>v</code>, <code>m</code> and <code>p</code> and assigns the id. The script below is shipped as <code>assets/language/samples/jitplugin/plugin_jit_demo.slc</code>, condensed: the file prints the failing answer before each <code>exit(1)</code>. It runs on the shipped AOT build as well as on the JIT one, and it exits 1 if any answer is wrong, because a sample that only printed a number would not prove the door replied:</p>
+
+<pre><code>if (!Bridge.Hosted) {
+    // THE SCRIPT'S OWN DOOR: `./` means "beside this script", which no command line has to say.
+    // The entry type is discovered: the one public static [UnmanagedCallersOnly] PluginInit in the assembly.
+    Bridge.LoadJitPlugin("./JitPluginFixture.dll");
+}
+
+print("door: hosted=" + Bridge.Hosted + " plugin=" + Bridge.Plugin);
+
+// A verb the plugin answers: the engine writes v/m/p and `Call` returns the value.
+var sum = Bridge.Call("add", { a: 20, b: 22 });
+print("add: r=" + sum);                                          // add: r=42
+
+// Two numbers in, one string out, which is what an envelope carries without a schema.
+var echo = Bridge.Call("echo", { a: 7, b: 9 });
+print("echo: r=" + echo);                                        // echo: r=echo:7/9
+
+// A verb the plugin does NOT serve: `CallEnvelope` answers a typed envelope, so the refusal is READ from its
+// members rather than caught, and no document key is spelled.
+var refused = Bridge.CallEnvelope("nope", {});
+print("unknown verb: ok=" + refused.Ok + " code=" + refused.Error.Code);       // ok=False code=UnknownVerb
+
+if (sum != 42) { exit(1); }
+if (echo != "echo:7/9") { exit(1); }
+if (refused.Ok || refused.Error.Code != "UnknownVerb") { exit(1); }
+
+// Dropping the door: `Call` is refused by name again, and another plugin may be loaded.
+if (Bridge.Plugin) { Bridge.DetachPlugin(); }
+print("plugin demo ok");</code></pre>
+
+<p>Run it against the plugin the samples folder carries, which is why both paths are relative (run this from the folder that holds the engine, i.e. the repository root, or a publish where <code>assets/</code> sits beside the exe):</p>
+
+<pre><code>ScriptLangCore.exe --plugin assets/language/samples/jitplugin/JitPluginFixture.dll JitPluginFixture.Entry assets/language/samples/jitplugin/plugin_jit_demo.slc</code></pre>
+
+<p>and its answer, measured on both builds:</p>
+
+<pre><code>door: hosted=True plugin=False
+add: ok=True r=42
+echo: ok=True r=echo:7/9
+unknown verb: ok=False code=UnknownVerb
+plugin demo ok</code></pre>
+
+<p><code>plugin=False</code> is <code>Bridge.Plugin</code> saying the door is the HOST's, which is why this run neither loads anything nor detaches anything. Run the file with no prefix at all (<code>ScriptLangCore.exe assets/language/samples/jitplugin/plugin_jit_demo.slc</code>) and the script opens the plugin itself: the first line reads <code>plugin=True</code>, and a <code>detached: hosted=False plugin=False</code> line appears before the verdict.</p>
+
+<p><strong>The sample folder</strong> (<code>assets/language/samples/jitplugin/</code>) holds the six files a reader can copy around: <code>plugin_jit_demo.slc</code> (the script above), <code>plugin_native_demo.slc</code> (the same door onto the plugin written in C), <code>JitPluginFixture.dll</code> (the compiled managed fixture), <code>JitPluginFixture.runtimeconfig.json</code> (the framework and roll-forward the plugin gets from its OWN file, and what marks this DLL as the managed kind), <code>JitPluginNative.dll</code> (the native fixture, whose LACK of a runtimeconfig is what marks it native), and <code>nethost.dll</code> (the bridge to hostfxr, which a NativeAOT engine does not carry). <code>PluginSession</code> looks for <code>nethost.dll</code> beside the engine first and then beside the plugin, so the folder is self-contained: copying it to another machine whose .NET 11 runtime (or a newer one, since the config rolls forward to the latest major) is installed is all the managed sample needs, and the native one needs nothing beyond Windows. Both DLLs are PREBUILT so this page's command works as written; to rebuild the managed one, run <code>dotnet build src/jitplugins/Fixture/JitPluginFixture.csproj -c Release</code> and copy the DLL and its <code>.runtimeconfig.json</code> into the folder (the source is the same file the loader's check builds), and to rebuild the native one run <code>src\jitplugins\native\build.bat</code> and copy <code>src\jitplugins\native\bin\JitPluginNative.dll</code> here.</p>
+
+<p><strong>The same door, a plugin written in C.</strong> A plugin does not have to be managed at all: what crosses is a C ABI, so a DLL that exports <code>PluginInit</code> is a plugin, and the OS loads it with <code>LoadLibrary</code> instead of a runtime being started for it. Which kind a file is comes from the folder and not from the image: a <code>&lt;name&gt;.runtimeconfig.json</code> beside the DLL means the hostfxr route, its absence means <code>LoadLibrary</code> plus <code>GetProcAddress("PluginInit")</code>, which is also why the entry-type slot is unused for a native plugin and the command spells a placeholder in it:</p>
+
+<pre><code>ScriptLangCore.exe --plugin assets/language/samples/jitplugin/JitPluginNative.dll native assets/language/samples/jitplugin/plugin_native_demo.slc</code></pre>
+
+<p>That plugin (<code>src/jitplugins/native/jitplugin_native.c</code>) serves four verbs, and the two the managed fixture does not have are the interesting ones: <code>utf8</code> answers an accented name and an emoji as BYTES, which is the contract's first rule, and <code>long</code> answers n characters through the length convention a host reads with, which is where an answer one byte short would show. Its demo checks all four, refuses nothing differently, and ends by dropping the door, exactly as the managed one does.</p>
+
+<p><code>--plugin</code> takes the plugin's assembly and its entry TYPE, and it is a PREFIX, so whatever follows is the ordinary command line: a <code>.slc</code>, a <code>.slcbc</code>, <code>--repl</code> (where the door stays attached for every <code>.run</code> of that session) or nothing at all, which opens the prompt. The type may be bare (<code>Namespace.Type</code>), because the loader qualifies it with the assembly's own name, and <code>nethost.dll</code> is looked for beside the engine and then beside the plugin, so a plugin folder copied on its own carries what it needs. <code>Bridge.Hosted</code> answers whether a door is installed, which lets a script say what it needs instead of failing on the first call.</p>
+
+<p>Nothing in either direction is a translation: the engine knows none of the plugin's verbs and the plugin knows none of the engine's, a refusal travels as the envelope's <code>e.code</code> (the fixture's unknown verb answers <code>bad=False code=UnknownVerb</code>), a plugin file that is not there is one sentence naming the assembly and NOTHING runs, and a wrong entry type is refused with the HRESULT and the qualified name it tried (<code>0x80131522</code>). Those four shapes are what the script-side legs of the check pin.</p>
+
 <h2 id="sqlite">SQLite as a third door</h2>
 
 <p>The same <code>ScriptLangCore.dll</code> is also a SQLite loadable extension, so a database can call script code from SQL. There is no separate artifact to build: the <code>Embed</code> configuration exports the entry point beside the twenty-four <code>slc_*</code> verbs, and registers six functions.</p>
@@ -1129,8 +1310,23 @@ Set engine = Nothing                       ' tears the session down</code></pre>
 
 
 <h2 id="limits">Limits, stated plainly</h2>
-<h3>There is no unloading</h3>
-<p>A loaded library stays loaded, and the AOT runtime inside it has threads of its own, so <code>FreeLibrary</code> after <code>slc_free</code> is not a supported teardown: the runtime would keep pointing at code the loader took away. Release sessions, keep the library, and let it live as long as the process does.</p>
+<h3>What unloads, and what does not</h3>
+<p><strong>The engine DLL itself is never unloaded.</strong> It is the AOT runtime with threads of its own, so <code>FreeLibrary</code> after <code>slc_free</code> is not a supported teardown: the runtime would keep pointing at code the loader took away. What <code>slc_free</code> releases is the SESSION. Every other piece of this stack is a separate leg, and each one answers the question for itself:</p>
+<table style="width:100%; font-size:0.85rem; border-collapse:collapse; margin-top:6px;">
+  <tr><th style="text-align:left; width:26%;">What you hold</th><th style="text-align:left; width:14%;">Freeable?</th><th style="text-align:left;">What releases it, and what it does not do</th></tr>
+  <tr><td><code>ScriptLangCore.dll</code>, the engine image</td><td><strong>No</strong></td><td>It stays for the life of the process. Freeing it after <code>slc_free</code> leaves the runtime's own threads pointing into unmapped code. Release sessions, not the library.</td></tr>
+  <tr><td>A session handle from <code>slc_create</code>, or a COM <code>ScriptLangCore.Session</code></td><td><strong>Yes</strong></td><td><code>slc_free</code>, or the COM object's <code>Free()</code>, disposes the interpreter: the windows the run created, its feeds, and the handles it declared (a <code>FileByteWriter</code> nobody closed, for instance). It does not free the DLL, a plugin's module, or a COM server the run started.</td></tr>
+  <tr><td>A MANAGED plugin (<code>--plugin</code>, <code>Bridge.LoadJitPlugin</code>)</td><td><strong>No</strong></td><td>It runs in a second CoreCLR, and <code>hostfxr_close</code> leaves that runtime loaded (measured). <code>Bridge.DetachPlugin()</code> drops the DOOR only, so the runtime, its threads and the plugin's memory stay for the life of the process.</td></tr>
+  <tr><td>A NATIVE plugin (<code>Bridge.LoadNativePlugin</code>)</td><td><strong>Yes, the module</strong></td><td><code>Bridge.DetachPlugin()</code> drops the door, discards the table and frees the module, so the file can be deleted, replaced or loaded again. It does not stop a thread or a callback the plugin started, and a script may not free that module itself while the door lives (refused by name).</td></tr>
+  <tr><td>A native a SCRIPT loads (<code>LoadLibrary</code>)</td><td><strong>Yes</strong></td><td><code>lib.Free()</code> or <code>FreeLibrary(handle)</code>. Two exceptions: a module a live plugin door points into (refused, detach first), and <code>sqlite3</code>, which the engine binds itself and keeps for the process's life (unloading it has produced an execute-into-unmapped-memory fault).</td></tr>
+  <tr><td>In-process COM automation (<code>Com.CreateObject</code>, <code>Com.Run</code>)</td><td><strong>The interfaces, yes. The application, no.</strong></td><td><code>Com.Run</code>'s scope releases the interfaces it tracked (and the big argument arrays) when it exits. The SERVER is a separate process and is quit by the SCRIPT (<code>Quit()</code> inside a <code>finally</code>), never by the engine; an attached instance cannot be quit through the engine at all, and whatever is still running is REPORTED at the run's end and counted in <code>Com.Stats().StillRunning</code>.</td></tr>
+  <tr><td>A SQLite database handle (<code>Sqlite.OpenDb</code>)</td><td><strong>Yes</strong></td><td><code>Sqlite.CloseDb(db)</code>. The <code>sqlite3.dll</code> module stays, one row up.</td></tr>
+  <tr><td>Main memory (<code>Mem.Alloc</code>, <code>Mem.Buffer</code>)</td><td><strong>Yes</strong></td><td><code>Mem.Free(ptr)</code>, or the buffer's <code>Dispose()</code>. A block a script can free a second way, through the pointer itself, is the script's own business: the interpreter's dispose refuses to touch it, which is what keeps a double free out of the process.</td></tr>
+  <tr><td>Feeds (<code>Events.Create</code>)</td><td><strong>Yes</strong></td><td><code>Dispose()</code> ends a feed, and <code>Complete()</code>/<code>Fail()</code> end it without disposing the handle. A producer stops cooperatively, by the documented <code>while (!feed.Closed)</code> loop, because there is no thread abort. Feeds still open are closed when the interpreter is disposed.</td></tr>
+  <tr><td>Windows, timers, hotkeys, the clipboard watcher</td><td><strong>Yes</strong></td><td>A run's windows go with its interpreter, and the explicit spellings exist too: <code>form.Close()</code>, a timer's <code>Stop()</code>, <code>GlobalHotKey.Unregister()</code>, <code>Clipboard.Unwatch()</code>. A window the HOST created is the host's.</td></tr>
+  <tr><td>A child process (<code>Process.Start</code>)</td><td><strong>Yes</strong></td><td><code>Kill()</code>, or let it exit and read <code>ExitCode</code> and <code>WaitForExit()</code>. This is the only honest way to unload code you did not write, which is why anything that must be stoppable belongs in a child process.</td></tr>
+</table>
+<p>Two consequences are what people trip on. <strong>The two plugin legs answer differently:</strong> the same <code>Bridge.DetachPlugin()</code> really does release a native DLL and only detaches a managed runtime, and the samples and the <a href="../language/index.html#Bridge">language reference</a> say which is which. And <strong>"released" never means "stopped":</strong> nothing in this stack aborts a thread, so a plugin, a producer or a feed that must stop cleanly has to cooperate. Anything that must be stoppable, unloadable or untrusted has one answer on every row of that table: a CHILD PROCESS.</p>
 
 <h3>A run inside a native call cannot be interrupted</h3>
 <p><code>slc_cancel</code> stops a script at its next boundary: the next statement, the next loop back-edge, or the next chunk of a <code>sleep</code>. A run blocked inside a native call (a blocking read, a COM call that never returns, a native busy loop) keeps running, and <code>slc_free</code> answers <code>3</code> with the reason instead of pretending. There is no thread abort, because a thread cannot be aborted safely on this platform. If untrusted scripts must be killable, run them in a CHILD PROCESS: that is what the CLI is, and what the clipboard tool's Kill button depends on.</p>

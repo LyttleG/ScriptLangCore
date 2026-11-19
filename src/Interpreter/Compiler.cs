@@ -161,7 +161,8 @@ internal static class Compiler
     /// past MaxByte, or a top-level `const` (whose const-ness the entry has no way to register yet). The caller
     /// reports the decline rather than bundling an entry that would behave differently.</summary>
     public static Bytecode? CompileProgram(IEnumerable<Stmt> statements, HashSet<string> builtins,
-        bool caseSensitive, IReadOnlyDictionary<string, FuncDecl[]>? calleeDecls, out string? declineReason)
+        bool caseSensitive, IReadOnlyDictionary<string, FuncDecl[]>? calleeDecls, out string? declineReason,
+        bool entryMayAwait = false)
     {
         var code = new List<byte>();
         var consts = new List<object?>();
@@ -185,6 +186,7 @@ internal static class Compiler
         var ctx = new Ctx(code, consts, constMap, localMap, locals, builtins, caseSensitive)
         {
             ProgramBody = true,
+            EntryMayAwait = entryMayAwait,
             CalleeDecls = calleeDecls,
         };
         CompileStmtList(ctx, body);
@@ -210,7 +212,8 @@ internal static class Compiler
     /// previous answer, which is the file carrying its whole source. A statement with no source text is never
     /// carried either, so nothing is emitted for a shape the loader could not re-parse.</summary>
     public static Bytecode? CompileProgramWithCarries(IReadOnlyList<Stmt> statements, HashSet<string> builtins,
-        bool caseSensitive, IReadOnlyDictionary<string, FuncDecl[]>? calleeDecls, out string? declineReason)
+        bool caseSensitive, IReadOnlyDictionary<string, FuncDecl[]>? calleeDecls, out string? declineReason,
+        bool entryMayAwait = false)
     {
         var code = new List<byte>();
         var consts = new List<object?>();
@@ -220,6 +223,7 @@ internal static class Compiler
         var ctx = new Ctx(code, consts, constMap, localMap, locals, builtins, caseSensitive)
         {
             ProgramBody = true,
+            EntryMayAwait = entryMayAwait,
             CalleeDecls = calleeDecls
         };
         var carried = 0;
@@ -239,7 +243,7 @@ internal static class Compiler
                 // A DECLARATION is skipped exactly as the ordinary body skips it: it is registered at LOAD (from its
                 // own text, or from a descriptor), never executed by the entry.
                 if (!Interpreter.IsDeclarationStatement(stmt) && stmt.SourceText is { Length: > 0 } text
-                    && !CompilesAlone(stmt, builtins, caseSensitive, calleeDecls, ctx.CallAssignedGlobals, ctx))
+                    && !CompilesAlone(stmt, builtins, caseSensitive, calleeDecls, ctx.CallAssignedGlobals, ctx, entryMayAwait))
                 {
                     EmitLoc(ctx, stmt.Line, stmt.Column);
                     EmitLoadConst(ctx, Interpreter.RunCarriedStatementHelperName);
@@ -287,7 +291,8 @@ internal static class Compiler
     /// body would decline again and the file would carry its whole source (measured on mega_crash_test).</summary>
 
     private static bool CompilesAlone(Stmt stmt, HashSet<string> builtins, bool caseSensitive,
-        IReadOnlyDictionary<string, FuncDecl[]>? calleeDecls, HashSet<string>? callAssigned, Ctx? outer = null)
+        IReadOnlyDictionary<string, FuncDecl[]>? calleeDecls, HashSet<string>? callAssigned, Ctx? outer = null,
+        bool entryMayAwait = false)
     {
         // THE PRECHECK ASKS WHAT THE REAL COMPILE WOULD ASK, so it is seeded with the names the body has ALREADY
         // declared (a copy: the throwaway compile must not allocate slots in the real one). With an empty map every
@@ -306,6 +311,7 @@ internal static class Compiler
         var ctx = new Ctx([], [], [], localMap, locals, builtins, caseSensitive)
         {
             ProgramBody = true,
+            EntryMayAwait = entryMayAwait,
             CalleeDecls = calleeDecls
         };
         if (outer != null)
@@ -765,6 +771,14 @@ internal static class Compiler
     {
         /// <summary>True when the body being compiled is an `async` one, the only place an `await` may suspend: anywhere else, a file's top level included, the body declines and the tree runs it with its driving wait.</summary>
         public bool IsAsyncBody;
+
+        /// <summary>True for the PROGRAM BODY a bundle carries as its ENTRY, which may hold a top-level `await`.
+        /// A source run suspends the STATEMENT instead (that is what the resumable run entry does, and the
+        /// per-statement compile a source run uses deliberately keeps declining an `await` so the driver owns the
+        /// suspension), while nothing resumes a compiled entry: `Interpreter.TryExecuteVmBody` drives it, one
+        /// awaited task at a time, and the VM's AWAIT resumes at the instruction AFTER itself. Only the bundle
+        /// export sets this, so the two entries cannot disagree about what a top-level await means.</summary>
+        public bool EntryMayAwait;
 
 
 
@@ -3241,7 +3255,10 @@ internal static class Compiler
     // the depth counter).
     private static void CompileAwaitExpr(Ctx ctx, AwaitExpr awe)
     {
-            if (!ctx.IsAsyncBody) { ctx.Success = false; return; }
+            // A bundle's ENTRY may await at its top level (see Ctx.EntryMayAwait). Everywhere else only an `async`
+            // body does, so the tree keeps the driving wait a source run's statement suspension would otherwise
+            // replace.
+            if (!ctx.IsAsyncBody && !ctx.EntryMayAwait) { ctx.Success = false; return; }
             CompileExpr(ctx, awe.Operand);
             ctx.Code.Add((byte)Opcode.AWAIT);
             return;
@@ -3320,7 +3337,8 @@ internal static class Compiler
 
     private static void CompileIncrementDecrementExpr(Ctx ctx, IncrementDecrementExpr ide)
     {
-            var deltaConst = ctx.AddConst(ide.Operator.Type == TokenType.PlusPlus ? 1 : -1);
+            var increment = ide.Operator.Type == TokenType.PlusPlus;
+            var deltaConst = ctx.AddConst(increment ? 1 : -1);
             switch (ide.Target)
             {
                 case VariableExpr tv when ctx.LocalMap.ContainsKey(tv.Name):
@@ -3336,70 +3354,56 @@ internal static class Compiler
                     }
                     else
                     {
-                        // push old value: DUP; cur + delta; store
+                        // Push the OLD value, then increment the SLOT: INC/DEC reads the slot, stores the new
+                        // value and pushes it, so the stack is [old, new] and POP leaves the OLD value, which
+                        // is what a postfix form answers. INC/DEC (not ADD 1) is what lets a CLR operand reach
+                        // op_Increment/op_Decrement instead of op_Addition.
                         ctx.Code.AddRange([(byte)Opcode.LOAD_VAR, (byte)tvIdx]);
-                        ctx.Code.Emit(Opcode.DUP);
-                        ctx.Code.AddRange([(byte)Opcode.LOAD_CONST, .. ctx.Code.ConstBytes(deltaConst)]);
-                        ctx.Code.Add((byte)Opcode.ADD);
-                        ctx.Code.AddRange([(byte)Opcode.STORE_VAR, (byte)tvIdx]);
+                        ctx.Code.Add((byte)(increment ? Opcode.INC : Opcode.DEC));
+                        ctx.Code.Add((byte)tvIdx);
+                        ctx.Code.Emit(Opcode.POP);
                     }
                     break;
                 case VariableExpr fv when ctx.IsMethod && ctx.FieldNames is { Count: > 0 } && ctx.FieldNames.Contains(fv.Name):
                     // Bare instance-field inc/dec (`X++` ≡ `this.X++`). SET_PROP pops
-                    // (value, target, name) with value on TOP, park the new value in a temp,
-                    // then [this, name, temp]. Postfix captures the OLD value first.
+                    // (value, target, name) with value on TOP. The field is read ONCE into a temp and the
+                    // TEMP is incremented, so the operation is op_Increment/op_Decrement (INC/DEC) rather
+                    // than op_Addition (ADD 1). Postfix captures the OLD value first.
                     {
                         var fvTmp = ctx.AllocTemp();
                         ctx.Code.AddRange([(byte)Opcode.LOAD_VAR, (byte)ctx.LocalIdx("this")]);
                         EmitLoadConst(ctx, fv.Name);
-                        ctx.Code.Add((byte)Opcode.GET_PROP);
-                        if (ide.IsPrefix)
-                        {
-                            // stack: [old] → ADD delta → [new]; park it; SET_PROP re-pushes it.
-                            ctx.Code.AddRange([(byte)Opcode.LOAD_CONST, .. ctx.Code.ConstBytes(deltaConst)]);
-                            ctx.Code.Add((byte)Opcode.ADD);
-                            ctx.Code.AddRange([(byte)Opcode.STORE_VAR, (byte)fvTmp]);
-                        }
-                        else
-                        {
-                            // stack: [old] → DUP (keep old for result), ADD delta → [old, new]
-                            ctx.Code.Emit(Opcode.DUP);
-                            ctx.Code.AddRange([(byte)Opcode.LOAD_CONST, .. ctx.Code.ConstBytes(deltaConst)]);
-                            ctx.Code.Add((byte)Opcode.ADD);
-                            ctx.Code.AddRange([(byte)Opcode.STORE_VAR, (byte)fvTmp]);
-                        }
+                        ctx.Code.Add((byte)Opcode.GET_PROP);                       // [old]
+                        EmitStoreVar(ctx, fvTmp);
+                        if (!ide.IsPrefix) EmitLoadVar(ctx, fvTmp);                // [old] = postfix result
+                        ctx.Code.Add((byte)(increment ? Opcode.INC : Opcode.DEC));
+                        ctx.Code.Add((byte)fvTmp);                                  // [.., new]
                         ctx.Code.AddRange([(byte)Opcode.LOAD_VAR, (byte)ctx.LocalIdx("this")]);
                         EmitLoadConst(ctx, fv.Name);
                         ctx.Code.AddRange([(byte)Opcode.LOAD_VAR, (byte)fvTmp]);
-                        ctx.Code.Add((byte)Opcode.SET_PROP);
+                        ctx.Code.Add((byte)Opcode.SET_PROP);                        // [.., new]
                         if (!ide.IsPrefix) ctx.Code.Emit(Opcode.POP);   // drop SET's pushed new; keep OLD
                         break;
                     }
                 case VariableExpr gv:
-                    // Global inc/dec, read-modify-write against the real global scope
-                    if (ide.IsPrefix)
+                    // Global inc/dec, read-modify-write against the real global scope through a TEMP local,
+                    // so the operation is INC/DEC (op_Increment/op_Decrement) rather than ADD 1 (op_Addition).
                     {
+                        var gTmp = ctx.AllocTemp();
                         ctx.Code.AddRange([(byte)Opcode.LOAD_GLOBAL_FAST, (byte)ctx.GlobalSlot(gv.Name)]);
-                        ctx.Code.AddRange([(byte)Opcode.LOAD_CONST, .. ctx.Code.ConstBytes(deltaConst)]);
-                        ctx.Code.Add((byte)Opcode.ADD);
-                        ctx.Code.Emit(Opcode.DUP);
+                        EmitStoreVar(ctx, gTmp);
+                        if (!ide.IsPrefix) EmitLoadVar(ctx, gTmp);                 // [old] = postfix result
+                        ctx.Code.Add((byte)(increment ? Opcode.INC : Opcode.DEC));
+                        ctx.Code.Add((byte)gTmp);                                   // [.., new]
                         ctx.Code.AddRange([(byte)Opcode.STORE_GLOBAL_FAST, (byte)ctx.GlobalSlot(gv.Name)]);
+                        if (ide.IsPrefix) EmitLoadVar(ctx, gTmp);                  // [new] = prefix result
+                        break;
                     }
-                    else
-                    {
-                        ctx.Code.AddRange([(byte)Opcode.LOAD_GLOBAL_FAST, (byte)ctx.GlobalSlot(gv.Name)]);
-                        ctx.Code.Emit(Opcode.DUP);
-                        ctx.Code.AddRange([(byte)Opcode.LOAD_CONST, .. ctx.Code.ConstBytes(deltaConst)]);
-                        ctx.Code.Add((byte)Opcode.ADD);
-                        ctx.Code.AddRange([(byte)Opcode.STORE_GLOBAL_FAST, (byte)ctx.GlobalSlot(gv.Name)]);
-                    }
-                    break;
                 default:
-                    // property / field / array-element targets, GET target+key, ADD delta,
-                    // then SET target+key+newvalue. SET_PROP/SET_INDEX push the stored value,
-                    // so the postfix case must capture the OLD value first (DUP before the ADD)
-                    // and then discard the pushed new value (POP after the SET).
-                    CompileIncDecMember(ctx, ide, deltaConst);
+                    // property / field / array-element targets: read ONCE into temps, INC/DEC the temp, then
+                    // SET target+key+newvalue. SET_PROP/SET_INDEX push the stored value, so the postfix case
+                    // loads the OLD value before the increment and discards the pushed new one (POP).
+                    CompileIncDecMember(ctx, ide, increment);
                     break;
             }
             return;
@@ -4864,27 +4868,26 @@ internal static class Compiler
                 ctx.Code.Add((byte)ctx.LocalIdx(incVar.Name));
                 return;
             }
-            // Global: push new value and leave it on the stack (prefix semantics)
+            // Global: park the value in a temp and INC/DEC it, so the operation is op_Increment/op_Decrement
+            // (not op_Addition), then write it back and leave the NEW value on the stack (prefix semantics).
+            var gTmp = ctx.AllocTemp();
             ctx.Code.AddRange([(byte)Opcode.LOAD_GLOBAL_FAST, (byte)ctx.GlobalSlot(incVar.Name)]);
-            EmitLoadConst(ctx, delta);
-            ctx.Code.Add((byte)Opcode.ADD);
-            ctx.Code.Emit(Opcode.DUP);
+            EmitStoreVar(ctx, gTmp);
+            ctx.Code.Add((byte)(delta > 0 ? Opcode.INC : Opcode.DEC));
+            ctx.Code.Add((byte)gTmp);
             ctx.Code.AddRange([(byte)Opcode.STORE_GLOBAL_FAST, (byte)ctx.GlobalSlot(incVar.Name)]);
+            EmitLoadVar(ctx, gTmp);
             return;
         }
         ctx.Success = false;   // property/index targets → tree (Task 2 lifts some)
     }
 
-    /// <summary>++/-- on property/field/index targets. The computed NEW value is parked in a
-    /// synthetic temp local so the store can be emitted in the VM's operand order: SET_PROP pops
-    /// (value, target, name) and SET_INDEX pops (value, target, idxs...), VALUE on top, which
-    /// re-pushing target/name after the ADD cannot produce. Both SET ops push the stored value
-    /// back: postfix keeps the DUP'd OLD value (discarding the pushed new with POP), prefix keeps
-    /// the pushed NEW value. Exactly ONE value is left on the stack. GET_INDEX/SET_INDEX each take
-    /// a trailing count byte (see Vm.cs).</summary>
-    /// <summary>++/-- on a property/field/index target, with the target resolved ONCE (see
-    /// ResolveTargetIntoTemps) so the read and the store act on the same receiver and element.</summary>
-    private static void CompileIncDecMember(Ctx ctx, IncrementDecrementExpr ide, int deltaConst)
+    /// <summary>++/-- on property/field/index targets. The value is read ONCE into temps, the TEMP is
+    /// incremented with INC/DEC (so the operation reaches op_Increment/op_Decrement, not op_Addition), and
+    /// the stored value is written back. SET_PROP/SET_INDEX push the stored value, so postfix loads the OLD
+    /// value first and discards the pushed new one; prefix keeps the pushed NEW value. Exactly ONE value is
+    /// left on the stack. GET_INDEX/SET_INDEX each take a trailing count byte (see Vm.cs).</summary>
+    private static void CompileIncDecMember(Ctx ctx, IncrementDecrementExpr ide, bool increment)
     {
         int ownerSlot;
         int[] indexSlots;
@@ -4917,17 +4920,15 @@ internal static class Compiler
         if (!ctx.Success) return;
         EmitResolvedRead(ctx, ownerSlot, indexSlots, member);              // [old]
         EmitStoreVar(ctx, oldSlot);
-        EmitLoadVar(ctx, oldSlot);
-        // `deltaConst` is an ALREADY-INTERNED pool index (the caller's AddConst), not a value: going through
-        // EmitLoadConst would intern the NUMBER and add that instead (measured: `g.N++` stored g.N + 0).
-        ctx.Code.Emit(Opcode.LOAD_CONST);
-        ctx.Code.EmitConstIdx(deltaConst);
-        ctx.Code.Emit(Opcode.ADD);                                        // [new]
+        if (!ide.IsPrefix) EmitLoadVar(ctx, oldSlot);                      // [old] = postfix result
+        // INC/DEC the TEMP, not ADD 1: a CLR type may define `++` differently from `+ 1`, and only
+        // INC/DEC reaches op_Increment/op_Decrement.
+        ctx.Code.Add((byte)(increment ? Opcode.INC : Opcode.DEC));
+        ctx.Code.Add((byte)oldSlot);                                       // [.., new]
         EmitStoreVar(ctx, newSlot);
-        EmitResolvedWrite(ctx, ownerSlot, indexSlots, member, newSlot);    // leaves [new]
-        if (ide.IsPrefix) return;                                         // prefix answers the new value
-        EmitPop(ctx);                                                     // postfix answers the OLD value
-        EmitLoadVar(ctx, oldSlot);
+        EmitResolvedWrite(ctx, ownerSlot, indexSlots, member, newSlot);    // leaves [.., new]
+        if (ide.IsPrefix) return;                                          // prefix answers the new value
+        EmitPop(ctx);                                                      // postfix answers the OLD value
     }
 
     /// <summary>Compound assign on property/index targets (a.b += v, arr[i] *= v). The computed NEW

@@ -2,7 +2,8 @@ namespace ScriptLangCore;
 
 internal static partial class Program
 {
-    private static void RunRepl(string? afterRunScript = null, Interpreter? adopt = null) => RunReplCore(afterRunScript, adopt);
+    private static void RunRepl(string? afterRunScript = null, Interpreter? adopt = null, IPluginBridge? plugin = null)
+        => RunReplCore(afterRunScript, adopt, plugin);
 
     /// <summary>THE SAME REPL, on an interpreter the CALLER owns, for the embedding ABI's `slc_repl`. Answers the code
     /// the session would exit with (a `.exit`/EOF leaves `Environment.ExitCode`, and a script's own `exit(n)` inside a
@@ -15,7 +16,7 @@ internal static partial class Program
         return Environment.ExitCode;
     }
 
-    private static void RunReplCore(string? afterRunScript, Interpreter? adopt)
+    private static void RunReplCore(string? afterRunScript, Interpreter? adopt, IPluginBridge? plugin = null)
     {
         try { Console.Clear(); } catch { /* Ignore console clear errors */ }
         PrintBanner();
@@ -30,6 +31,10 @@ internal static partial class Program
             ? InterpreterManager.Create(caseSensitive: true, context: "REPL")
             : InterpreterHandle.Adopt(adopt);
         var itp = replHandle.Instance;
+
+        // A plugin reaches every `.run` of this session, which is what one interpreter per session means: attaching to
+        // the interpreter that LIVES for the session, not to a run. `Bridge.Hosted` answers true from then on.
+        if (plugin is not null) PluginSession.Attach(itp, plugin);
 
         // The HTTP pipeline invokes `http.Use` middleware on one interpreter across requests, and this is the durable
         // one: it lives as long as the session, where a tool's interpreter is disposed once the tool has been loaded.

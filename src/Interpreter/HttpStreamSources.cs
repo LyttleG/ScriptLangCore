@@ -141,9 +141,9 @@ internal partial class Interpreter
             // PARKED, on the SERVER thread: `IHttpStreamSource.MoveNext` is a synchronous pull by contract (the
             // transport stays plain synchronous code), so the step waits here and is counted under its own site. The
             // run's kill signal does not travel to this thread, so a cancel is not what ends a stream: the writer's
-            // own request token is.
-            WaitForTask(scriptTask, "http stream", 0, 0);
-            if (scriptTask.Result is not bool hasNext || !hasNext) return false;
+            // own request token is. ONE wait: `WaitForValue` is the wait AND the read (the engine never reads
+            // `Task.Result`, whose getter waits again).
+            if (WaitForValue(scriptTask, "http stream", 0, 0) is not bool hasNext || !hasNext) return false;
             item = ReadReflected(_current, enumerator, 0, 0, "Current");
             return true;
         }

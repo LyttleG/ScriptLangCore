@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE PLUGIN SIDE of the JIT-plugin loader's pin: an ordinary JIT class library, exactly as a third party would
+       write one. It declares its OWN copy of the table (that is what a C ABI means: the layout is the contract, not a
+       shared C# type), it ships its own runtimeconfig.json, and it is loaded by an AOT host through nethost/hostfxr.
+       `src/build/jitplugin-check.sh` builds it and stages it beside the host.
+
+       THE RUNTIMECONFIG IS HAND-WRITTEN, because a class library build writes none and the loader starts the
+       plugin's runtime from THAT file. It names `Microsoft.NETCore.App` 11.0.0 with `rollForward: latestMajor`, so
+       the version in it is a FLOOR rather than a pin: a machine carrying a newer runtime runs this plugin without a
+       rebuild, while a machine with only an older one is still refused by name instead of half-started. JSON takes
+       no comments, which is why the reason lives here.
+
+       WHY NOT `netstandard2.1` (asked for, and measured twice): that surface has no
+       `UnmanagedCallersOnlyAttribute` (CS0246) and no unmanaged function pointers (CS8889, "the target runtime does
+       not support default/extensible calling conventions"), which are the two things this plugin IS: the entry point
+       `load_assembly_and_get_function_pointer` resolves and the table it fills. It also has no framework to start,
+       so a plugin built that way would still need a config naming a concrete runtime. The framework version is the
+       one precise number the contract cannot drop; its ROLL-FORWARD is what is up to the plugin, and it is wide. -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>JitPluginFixture</AssemblyName>
+    <RootNamespace>JitPluginFixture</RootNamespace>
+  </PropertyGroup>
+
+</Project>

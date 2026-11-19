@@ -156,8 +156,13 @@ internal partial class Interpreter
             // still replays imports for a DECLARATION-ONLY load, where no top level ever runs and a loaded
             // function must still find its module's names (see RegisterLoadedDeclarations).
             var bodyStatements = _programStatements;
+            // `entryMayAwait`: THIS body is the entry a bundle runs, and nothing resumes a compiled entry, so its
+            // top-level `await` compiles and `Interpreter.TryExecuteVmBody` drives the suspension. Measured before
+            // it: the await declined the body, the statement carrier ran it on the TREE, and there it could only
+            // PARK — `top_level_await_test` 6a/7a/7b and 1c (a shown form stopped ticking during the wait) failed
+            // from a bundle where the file passed.
             _programBytecode = Compiler.CompileProgram(bodyStatements, builtins, CaseSensitive, calleeDecls,
-                out var declineReason);
+                out var declineReason, entryMayAwait: true);
             if (_programBytecode == null && StatementCarrierEnabled)
             {
                 // The body did not compile as ONE unit. A top-level statement the VM cannot model is handed to the
@@ -165,7 +170,7 @@ internal partial class Interpreter
                 // and everything else compiles as usual. Measured: this is what turns "no entry, so the file carries
                 // its whole source" into a runnable entry for the `LambdaExpr` and `IsPatternExpr` families.
                 _programBytecode = Compiler.CompileProgramWithCarries(bodyStatements, builtins, CaseSensitive,
-                    calleeDecls, out var carriedDecline);
+                    calleeDecls, out var carriedDecline, entryMayAwait: true);
                 if (_programBytecode != null) declineReason = carriedDecline;
             }
             ProgramBodyDeclineReason = declineReason;
@@ -1055,7 +1060,14 @@ moduleInterpreter.LoadBundleFromFile(fullPath);
         if (skipped.Count > 0) report += " (" + string.Join(", ", skipped) + ")";
         report += programBody != null
             ? $", entry {bundleEntry}"
-            : $", no entry: the top level did not compile ({ProgramBodyDeclineReason ?? "declined"}), so this bundle is a function library";
+            : bundleEntry != null
+                // An ENTRY THE CALLER NAMED is an entry even when this run has no program body to compile (a run
+                // loaded from a bundle: its functions are the session's, its program is the one that already ran).
+                // Measured: a suite exporting its own `myMath` from inside its bundle reported "no entry: the top
+                // level did not compile (declined)", which reads as "the bundle carries nothing to run" while the
+                // entry it just wrote IS named.
+                ? $", entry {bundleEntry} (a named function: this run has no program body to compile)"
+                : $", no entry: the top level did not compile ({ProgramBodyDeclineReason ?? "declined"}), so this bundle is a function library";
         if (strippedSource)
         {
             // The class count is what was WRITTEN (an enum travels in the declarations section, not as a class
@@ -1487,6 +1499,14 @@ moduleInterpreter.LoadBundleFromFile(fullPath);
             // resolved to the SECOND lambda's body, whose `label` capture is not passed, and `label + ":" + s` printed
             // `:one` (null coerces to "") instead of `a:one`, so both 1a and 1b failed from the bundle only.
             RegisterNestedDecl(d);
+            // A LOADED function belongs to this SESSION, so a script that exports from INSIDE a bundle can take it.
+            // `ExportTopLevelToBundleBytes` asks `_scriptTopLevel`, which a SOURCE run fills while parsing and a
+            // bundle load never touched, so the same script answered "entry function 'sumTo' is not VM-compiled or
+            // not found in this script" from its own bundle (measured: seven suites, every export-family row of the
+            // parity ledger). The declaration carries the compiled body the export's own gate asks for
+            // (`d.Compiled != null`), which is what makes this the honest half: a loaded body is bytecode already,
+            // so re-exporting it writes the same stream rather than inventing one.
+            if (!_scriptTopLevel.Contains(d)) _scriptTopLevel.Add(d);
             var fn = new ScriptFunction(d, SEmptySnapshot, d.ReturnType, GetParameterTypes(d.Params),
                 d.IsRefParams, Flags: FunctionFlags.Legacy, IsOutParams: d.IsOutParams);
             // A bundle's function table can hold the SAME name twice, which a source run binds as an overload set
@@ -1758,6 +1778,16 @@ moduleInterpreter.LoadBundleFromFile(fullPath);
                     BindLoadedName(cdText.Name, classValueText);
                 else if (node is StructDeclStmt sdText && Structs.TryGetValue(sdText.Name, out var structValueText))
                     BindLoadedName(sdText.Name, StructDefinitionHandle(sdText.Name));
+                // A TEXT-CARRIED FUNCTION is a TREE-BACKED declaration (`Compiled` is null, which is why it travelled
+                // as text: its body is one the VM cannot take). A compiled caller reaches it through
+                // `__nested_fn__(name, line, column, pairs...)`, which answers from these two maps, and a loaded bundle
+                // has no `Bytecode.NestedDecls` to fill them from (that channel is IN MEMORY only). The WIRE's position
+                // is passed rather than the node's, because the text was re-parsed HERE and its Line/Column are relative
+                // to the snippet. Measured: a `Task.Run` body declaring `void Bump() { try { ... } }` and calling it
+                // twice answered "Function '' was loaded from bytecode for a different environment" from its bundle
+                // while the file printed its value (`vm_caplambda` 10a/10b).
+                else if (node is FuncDecl fdText)
+                    RegisterNestedDecl(fdText, ct.Line, ct.Column);
             }
         }
     }

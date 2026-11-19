@@ -92,14 +92,14 @@ internal static partial class Program
     ///
     /// KEEP IN STEP WITH THE SWITCH IN <see cref="RunMain"/>: these are exactly its `args[0]` arms. A suite cannot call
     /// this predicate (no script surface), so `tools/embed-check.sh`'s host pins each spelling and a few negatives.</summary>
-    internal static readonly string[] EngineArguments = ["--mcp", "--mcp-bc", "--repl", "--dump-bytecode", "--compile"];
+    internal static readonly string[] EngineArguments = ["--mcp", "--mcp-bc", "--repl", "--dump-bytecode", "--compile", "--plugin"];
 
     /// <summary>Would the engine's own dispatch act on this FIRST argument? Case-sensitive, like the switch it mirrors,
     /// and a path or a bare word is never an engine argument.</summary>
     internal static bool OwnsArgument(string? argument)
         => argument is not null && Array.IndexOf(EngineArguments, argument) >= 0;
 
-    private static int RunMain(string[] args, Interpreter? adopt = null)
+    private static int RunMain(string[] args, Interpreter? adopt = null, IPluginBridge? plugin = null)
     {
         // Force UTF-8 encoding to ensure the emoji renders correctly. THAT ASSIGNMENT RE-CREATES Console.Out, so the
         // engine's ProcessStdout baseline is re-captured right after it: otherwise every later print looks like a
@@ -112,6 +112,26 @@ internal static partial class Program
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Forced, true, true);
         TrimWorkingSet();
+
+        // ── A JIT PLUGIN PREFIX, BEFORE THE DISPATCH ────────────────────────────────────────────────────────
+        // `--plugin <assembly.dll> <Namespace.Type>` opens a second runtime for the plugin and wires its verb door to
+        // the interpreter that RUNS whatever follows, so a script reaches it with `Bridge.Call(request)` and the
+        // envelope the plugin answers comes back as a parsed dictionary. It is a PREFIX rather than an arm because
+        // everything after it is an ordinary command line: `--plugin p.dll T app.slc`, `--plugin p.dll T --repl`,
+        // `--plugin p.dll T app.slcbc`. THE HOST decides this and never a script, because opening a runtime from
+        // script code would be both a sandbox escape and an uncatchable crash path (see `PluginSession`).
+        if (plugin is null && args.Length >= 3 && args[0] == "--plugin")
+        {
+            try { plugin = PluginSession.Load(args[1], args[2]); }
+            catch (PluginLoadException ex)
+            {
+                // A HOST-facing sentence, so it goes to stderr as it is rather than through the message map (the map
+                // exists to keep a CLR resource key out of a SCRIPT's error).
+                Console.Error.WriteLine("Error: " + ex.Message);
+                return ExitCode.Usage;
+            }
+            args = args[3..];
+        }
 
         switch (args.Length)
         {
@@ -196,7 +216,7 @@ internal static partial class Program
                         if (url != null)
                             Console.WriteLine($"[MCP] HTTP+SSE listening on {url}");
                         Console.WriteLine("[MCP] Type .mcp to list registered tools.");
-                        RunRepl(adopt: adopt);
+                        RunRepl(adopt: adopt, plugin: plugin);
                     }
                     else
                     {
@@ -214,7 +234,7 @@ internal static partial class Program
                 {
                     // REPL mode with auto-run: start REPL then .run the specified script
                     var scriptToRun = args[1];
-                    RunRepl(afterRunScript: scriptToRun, adopt: adopt);
+                    RunRepl(afterRunScript: scriptToRun, adopt: adopt, plugin: plugin);
                     break;
                 }
             case > 0 when args[0] == "--dump-bytecode" && args.Length > 1:
@@ -241,16 +261,16 @@ internal static partial class Program
                 // CLI mode: run a compiled bytecode bundle and exit. Without this arm a .slcbc matched nothing,
                 // so the process fell through to the REPL: no output, no error, just a prompt waiting for input,
                 // which reads as a hang.
-                RunBytecodeBundle(args[0]);
+                RunBytecodeBundle(args[0], plugin);
                 break;
             case > 0 when args[0].EndsWith(".slc", StringComparison.OrdinalIgnoreCase):
                 // CLI mode: execute a script file and exit. A HOST that adopted an interpreter (`slc_main`) runs it on
                 // THAT one, which is what makes every namespace member see the run's own tables and directory.
-                RunFile(args[0], quiet: false, adopt: adopt);
+                RunFile(args[0], quiet: false, adopt: adopt, plugin: plugin);
                 break;
             default:
                 // REPL mode: interactive prompt
-                RunRepl(adopt: adopt);
+                RunRepl(adopt: adopt, plugin: plugin);
                 break;
         }
 
@@ -294,7 +314,7 @@ internal static partial class Program
         private set => _lastRunValue = value;
     }
 
-    private static void RunFile(string scriptPath, bool quiet = false, Interpreter? adopt = null)
+    private static void RunFile(string scriptPath, bool quiet = false, Interpreter? adopt = null, IPluginBridge? plugin = null)
     {
         var fullPath = Path.GetFullPath(scriptPath);
         if (!File.Exists(fullPath))
@@ -325,8 +345,13 @@ internal static partial class Program
         // `RunFileAsync`/`RunFileInAsync` hand back the run's OWN completion, and `.Result` here drains the run queue
         // until that completion lands (the pump `Task.Wait` has always driven), so the observable behaviour of this
         // entry is unchanged while a host gets the identical Task from the ABI's asynchronous verbs.
+        // A PLUGIN IS ATTACHED TO THE INTERPRETER THAT RUNS THE FILE, whichever that is: the adopted one here, or the
+        // one this run CREATES (which exists only inside the runner, hence the hook). One rule, both paths, so a
+        // `--plugin` never silently stops applying because a host adopted the session.
+        Action<Interpreter>? attach = plugin is null ? null : interpreter => PluginSession.Attach(interpreter, plugin);
+        if (adopt is not null) attach?.Invoke(adopt);
         var answer = adopt is null
-            ? ScriptRunner.RunFileAwaiting(fullPath)
+            ? ScriptRunner.RunFileAwaiting(fullPath, attach: attach)
             : ScriptRunner.Await(ScriptRunner.RunFileInAsync(adopt, fullPath));
         var (outcome, value) = (answer.Outcome, answer.Value);
         LastRunOutcome = outcome;

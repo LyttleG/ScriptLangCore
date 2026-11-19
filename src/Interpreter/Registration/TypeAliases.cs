@@ -639,6 +639,12 @@ internal partial class Interpreter
         ["TreeView"] = typeof(TreeView),
         ["CronType"] = typeof(CronType),
         ["ErrorInfo"] = typeof(ScriptErrorInfo),
+        // THE TYPED BRIDGE ANSWER: `Bridge.CallEnvelope` answers a BridgeEnvelope whose `Error` is a BridgeError, so a
+        // script names both (`is`, `typeof`) like any other engine type. Their members are read by reflection only,
+        // which is why AotHints roots them.
+        ["BridgeEnvelope"] = typeof(BridgeEnvelope),
+        ["BridgeError"] = typeof(BridgeError),
+        ["BridgeRequest"] = typeof(BridgeRequest),
         ["SqliteIterator"] = typeof(SqliteIterator),
         ["SqliteMappingIterator"] = typeof(SqliteMappingIterator),
         ["SqliteRow"] = typeof(SqliteRow),
@@ -687,6 +693,9 @@ internal partial class Interpreter
         [typeof(Namespace)] = "Namespace",
         [typeof(NativeFunctionAdapter)] = "Native",
         [typeof(ScriptResult)] = "Result",
+        [typeof(BridgeEnvelope)] = "BridgeEnvelope",
+        [typeof(BridgeError)] = "BridgeError",
+        [typeof(BridgeRequest)] = "BridgeRequest",
         [typeof(VoidMarker)] = "VoidMarker",
         [typeof(ScriptBoxedList)] = "List",
         [typeof(ScriptBoxedDictionary)] = "Dictionary",

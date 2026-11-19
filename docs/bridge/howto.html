@@ -217,7 +217,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
   <tr><td>the engine's own code</td><td>A handler that threw answers its own code (<code>Unspecified</code> for a plain failure, <code>DivisionByZero</code>, <code>UndefinedVariable</code>, <code>Cancelled</code>, and so on) with its message, <code>at</code> and <code>frames</code>.</td></tr>
 </table>
 
-<div class="note"><strong>A verb the host does not know is the handler's decision, not the dispatcher's.</strong> The dispatcher only checks the envelope. A handler that receives an unknown <code>m</code> and answers <code>Bridge.Fail(req["id"], "NoSuchVerb", ...)</code> is what makes the refusal app-specific; a handler that ignores the verb and answers <code>Ok</code> is equally legal, and that is the contract being silent about verbs rather than vague.</div>
+<div class="note"><strong>A verb the host does not know is the handler's decision, not the dispatcher's.</strong> The dispatcher only checks the envelope. A handler that receives an unknown <code>Verb</code> and answers <code>req.Fail("NoSuchVerb", ...)</code> is what makes the refusal app-specific; a handler that ignores the verb and answers <code>req.Ok(...)</code> is equally legal, and that is the contract being silent about verbs rather than vague.</div>
 
 <h2 id="failures">Two kinds of failure</h2>
 <p><strong>A contract failure is an answer.</strong> An unknown verb, another version, a handler that threw: all of them travel INSIDE the document as <code>ok:false</code>, so the transport succeeded and the code is a value a host branches on.</p>
@@ -236,35 +236,34 @@ hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
   <tr><td><code>Bridge.Version</code></td><td>The contract version this build speaks, as a number (<code>1</code>).</td></tr>
   <tr><td><code>Bridge.Served</code></td><td>Whether a handler is registered, so a script can decide before it advertises anything.</td></tr>
   <tr><td><code>Bridge.Hosted</code></td><td>Whether a host installed its side, which is what <code>Bridge.Call</code> needs.</td></tr>
-  <tr><td><code>Bridge.Serve(handler)</code></td><td>Registers the function that answers the host's requests. It takes ONE parameter, the request as a script dictionary (<code>req["m"]</code>, <code>req["p"]</code>), and answers the text <code>Bridge.Ok</code> or <code>Bridge.Fail</code> builds. <code>Bridge.Serve(null)</code> stops serving, and one handler per session means a second call replaces the first.</td></tr>
+  <tr><td><code>Bridge.Serve(handler)</code></td><td>Registers the function that answers the host's requests. It takes ONE parameter, the request as a <code>BridgeRequest</code> object (<code>Verb</code>, <code>Id</code>, <code>Version</code>, <code>Parameters</code>, and <code>Document</code> for the parsed request), and answers the text <code>req.Ok(...)</code> or <code>req.Fail(...)</code> builds for that request. <code>Bridge.Serve(null)</code> stops serving, and one handler per session means a second call replaces the first.</td></tr>
   <tr><td><code>Bridge.Handle(request)</code></td><td>The host to script door as text. Every carrier calls it underneath.</td></tr>
   <tr><td><code>Bridge.Call(request)</code></td><td>The script to host door. Answers the parsed response document, and refuses by name when no host installed its side.</td></tr>
-  <tr><td><code>Bridge.Ok(id, result)</code></td><td>Builds a successful response document.</td></tr>
-  <tr><td><code>Bridge.Fail(id, code, message [, retry | options])</code></td><td>Builds a failed one. <code>id</code> may be null when the request had none, and <code>code</code> and <code>message</code> must be non-empty. The fourth argument is either the <code>retry</code> boolean or an options object: <code>{ retry: true, retryAfter: 250, details: { field: "total" } }</code>. An unknown option, or one of the wrong type, is refused by name.</td></tr>
-  <tr><td><code>Bridge.FromError(id, error)</code></td><td>Turns a CAUGHT value into the contract's error object: an <code>ErrorInfo</code>, or a <code>{ code: ..., message: ... }</code> dictionary, so a failure the script handled answers in the same shape as one the engine caught. A dictionary is read member by member: <code>retry</code>, <code>retryAfter</code> and <code>details</code> travel when present, and a malformed member is refused by name.</td></tr>
+  <tr><td><code>req.Ok(result)</code><br><code>req.Fail(code, message [, retry | options])</code><br><code>req.FromError(error)</code></td><td>The request-side builders, and the spelling a <code>Serve</code> handler should use: each is the namespace member of the same name with the request's own id supplied, so a handler never restates <code>req.Id</code> and never writes the envelope by hand. A request that carried no id gets an answer with none, the text is identical to <code>Bridge.Ok(req.Id, result)</code>, and a refusal names <code>req.Fail</code>.</td></tr>
+  <tr><td><code>Bridge.Ok(id, result)</code></td><td>Builds a successful response document. Inside a <code>Serve</code> handler, <code>req.Ok(result)</code> is the same document with the request's id, which is the spelling to prefer.</td></tr>
+  <tr><td><code>Bridge.Fail(id, code, message [, retry | options])</code></td><td>Builds a failed one. <code>id</code> may be null when the request had none, and <code>code</code> and <code>message</code> must be non-empty. The fourth argument is either the <code>retry</code> boolean or an options object: <code>{ retry: true, retryAfter: 250, details: { field: "total" } }</code>. An unknown option, or one of the wrong type, is refused by name. <code>req.Fail(code, message [, retry | options])</code> is the same document with the request's id.</td></tr>
+  <tr><td><code>Bridge.FromError(id, error)</code></td><td>Turns a CAUGHT value into the contract's error object: an <code>ErrorInfo</code>, or a <code>{ code: ..., message: ... }</code> dictionary, so a failure the script handled answers in the same shape as one the engine caught. A dictionary is read member by member: <code>retry</code>, <code>retryAfter</code> and <code>details</code> travel when present, and a malformed member is refused by name. <code>req.FromError(error)</code> is the same with the request's id.</td></tr>
 </table>
 
 <h4>A handler that serves two verbs</h4>
 <pre><code>Bridge.Serve(fun (req) {
-    var verb = "" + req["m"];
-    var id = req.ContainsKey("id") ? req["id"] : null;      <span style="color:var(--text-dim);">// echoed by the dispatcher, but read here to answer</span>
+    var verb = req.Verb;                                    <span style="color:var(--text-dim);">// the typed request: Verb, Id, Version, Parameters, Document</span>
     if (verb == "invoice.post") {
-        if (req["p"]["total"] &lt; 0) { return Bridge.Fail(id, "BadTotal", "a total cannot be negative"); }
-        return Bridge.Ok(id, { posted: true, invoice: 4171 });
+        if (req.Parameters["total"] &lt; 0) { return req.Fail("BadTotal", "a total cannot be negative"); }
+        return req.Ok({ posted: true, invoice: 4171 });      <span style="color:var(--text-dim);">// the id is the request's, echoed for you</span>
     }
     if (verb == "invoice.get") {
-        return Bridge.Ok(id, { invoice: 4171, total: 120.50 });
+        return req.Ok({ invoice: 4171, total: 120.50 });
     }
-    return Bridge.Fail(id, "NoSuchVerb", "this script serves invoice.post and invoice.get, not " + verb);
+    return req.Fail("NoSuchVerb", "this script serves invoice.post and invoice.get, not " + verb);
 });</code></pre>
 
 <h4>Answering a failure the script handled</h4>
 <pre><code>Bridge.Serve(fun (req) {
-    var id = req.ContainsKey("id") ? req["id"] : null;
     try {
-        return Bridge.Ok(id, { rows: Database.Rows(req["p"]) });
+        return req.Ok({ rows: Database.Rows(req.Parameters) });
     } catch (var e) {
-        return Bridge.FromError(id, e);        <span style="color:var(--text-dim);">// ErrorInfo: code, message and the frames travel as they are</span>
+        return req.FromError(e);               <span style="color:var(--text-dim);">// ErrorInfo: code, message and the frames travel as they are</span>
     }
 });</code></pre>
 
@@ -782,8 +781,8 @@ engine.slc_run_text(handle,
 # host -> script
 engine.slc_run_text(handle,
     b'Bridge.Serve(fun (req) {\n'
-    b'    if (req["m"] == "echo") { return Bridge.Ok(req["id"], { n: req["p"]["n"] * 2 }); }\n'
-    b'    return Bridge.Fail(req["id"], "NoSuchVerb", "no " + req["m"]);\n'
+    b'    if (req.Verb == "echo") { return Bridge.Ok(req.Id, { n: req.Parameters["n"] * 2 }); }\n'
+    b'    return Bridge.Fail(req.Id, "NoSuchVerb", "no " + req.Verb);\n'
     b'});', None)
 
 def ask(document):
@@ -805,7 +804,7 @@ engine.slc_free(handle)</code></pre>
   <li><strong>The buffer parameter is <code>c_void_p</code>.</strong> With <code>c_char_p</code> the parameter is an immutable <code>bytes</code>, so the host writes nothing and still answers a length: the engine then parses a document that does not exist. Write with <code>ctypes.memmove</code> and terminate with <code>memset</code>.</li>
   <li><strong>Keep the callback objects alive.</strong> A <code>CFUNCTYPE</code> object owns the native thunk; if Python collects it, the engine calls freed memory. A module-level or function-local that outlives the session is enough.</li>
   <li><strong><code>ctypes.WinDLL</code></strong>, not <code>CDLL</code>, and an x64 interpreter.</li>
-  <li><strong>Give the handler a request that HAS an <code>id</code></strong> when the handler echoes it. An absent <code>id</code> is legal (rule 6), and a handler that reads <code>req["id"]</code> unconditionally refuses the request, which is a fact about the handler rather than about the call.</li>
+  <li><strong>Give the handler a request that HAS an <code>id</code></strong> when the handler echoes it. An absent <code>id</code> is legal (rule 6), and the typed request reads it as <code>req.Id == null</code>, so a handler that echoes it refuses nothing.</li>
   <li><strong>Read <code>slc_last_error</code> only on a negative status.</strong> A contract failure is a document with <code>ok:false</code>.</li>
 </ul>
 
@@ -952,10 +951,10 @@ $null = $free.Invoke($session)</code></pre>
 $engine = New-Object -ComObject ScriptLangCore.Session
 $null = $engine.RunText(@'
 Bridge.Serve(fun (req) {
-    var verb = "" + req["m"];
-    if (verb == "echo") { return Bridge.Ok(req["id"], { n: req["p"]["n"] * 2 }); }
+    var verb = req.Verb;
+    if (verb == "echo") { return Bridge.Ok(req.Id, { n: req.Parameters["n"] * 2 }); }
     if (verb == "boom") { throw "com boom"; }
-    return Bridge.Fail(req["id"], "NoSuchVerb", "no " + verb);
+    return Bridge.Fail(req.Id, "NoSuchVerb", "no " + verb);
 });
 '@)
 

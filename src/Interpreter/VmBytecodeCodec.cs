@@ -1330,6 +1330,10 @@ internal static class VmBytecodeCodec
     /// derivation still covers the shell layout that has no flags byte (<see cref="ReadFuncShell"/>).</summary>
     private static void ApplyBodyFlags(FuncDecl fd, bool hasYield, bool hasAwait, bool isAsync)
     {
+        // `hasAwait` DERIVES `IsAsync`, and that includes the PROGRAM ENTRY: a bundle entry whose top level awaits
+        // IS an async body, which is how .NET 11's runtime async models one (no generated state machine, the runtime
+        // supports it), so `InvokeScriptFunction` hands back the engine's Task and the run entry awaits it once
+        // (`Interpreter.InvokeRunEntry`) exactly as a C# entry point does for an `async Main`.
         fd.HasYield = hasYield;
         fd.IsAsync = isAsync || hasAwait;
         fd.IsCoroutine = hasYield || fd.IsAsync;

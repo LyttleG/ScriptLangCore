@@ -58,6 +58,7 @@
   <a href="#ulong">ulong</a>
   <a href="#DateTimeOffset">DateTimeOffset</a>
   <a href="#TimeSpan">TimeSpan</a>
+  <a href="#BigInteger">BigInteger</a>
   <a href="#Result">Result</a>
 <a href="#Array">Array</a>
   <a href="#function">Function</a>
@@ -471,6 +472,7 @@
     <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--dump-bytecode &lt;file.slc&gt;</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">Prints the constant table, the locals, the global slots and every compiled function, without running anything. The same compile step as <code>--compile</code>.</td></tr>
     <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--program</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">With <code>--dump-bytecode</code>: also reports whether the script's TOP LEVEL itself compiled, and if not, which statement declined.</td></tr>
     <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--repl [file.slc]</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">Starts the REPL, and with a file also runs it first (the same as typing <code>.run file.slc</code> at the prompt).</td></tr>
+    <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--plugin &lt;dll&gt; &lt;Type&gt;</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">Opens a JIT plugin and installs its verb door as the session's bridge, so a script reaches it with <code>Bridge.Call</code> (<code>Bridge.Hosted</code> answers true). A PREFIX: everything after the pair is the ordinary command line, and a <code>--repl</code> session keeps the door for every <code>.run</code>. Host side only, because no script may open a runtime. See <code>docs/embed/howto.html</code>.</td></tr>
     <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--mcp</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">Starts an MCP server (stdio, or HTTP with <code>--port</code> / <code>--url</code>), and EXECUTES every tool script in the tools directory so they can register themselves with <code>RegisterMcpTool()</code>. <code>--repl</code> combines the server with a prompt. See <code>docs/mcp/howto.html</code>.</td></tr>
     <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--mcp-bc</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">The same server, but the tools directory holds COMPILED bundles (<code>*.slcbc</code>) instead of sources (<code>*.slc</code>). Each bundle is loaded and run, so its top-level <code>RegisterMcpTool()</code> calls still register: a compiled bundle is not merely a library.</td></tr>
     <tr><td style="padding:4px 8px; border:1px solid var(--border);"><strong>--tools-dir &lt;dir&gt;</strong></td><td style="padding:4px 8px; border:1px solid var(--border);">Where the MCP server looks for tool scripts. Repeatable, and it defaults to <code>tools/</code> beside the executable. A relative path resolves against the current directory.</td></tr>
@@ -806,12 +808,17 @@ two lines with ""quotes""."</code></div>
     <div class="syntax"><span class="kw">var</span> <span class="kw">now</span> = <span class="typ">DateTime</span>.Now;</div>
     <div class="example"><span class="kw">var</span> <span class="kw">start</span> = <span class="typ">DateTime</span>.Now;
 <span class="fn">sleep</span>(<span class="num">100</span>);
-<span class="kw">var</span> <span class="kw">elapsed</span> = (<span class="typ">DateTime</span>.Now.Ticks - <span class="kw">start</span>.Ticks) / <span class="num">10000</span>;
-<span class="fn">print</span>(<span class="str">"Elapsed ms: "</span> + <span class="kw">elapsed</span>);</div>
-    <p>A <code>DateTime</code> is not a number: arithmetic and a cast on one are refused, and the sentence names the
-    three ways to get a number out of it. <code>.ToOADate()</code> is the serial a spreadsheet counts in (days since
-    1899-12-30, so <code>46024.25</code> is an afternoon) with <code>DateTime.FromOADate</code> to come back,
-    <code>.Ticks</code> is the tick count since year 1, and <code>.ToString(...)</code> is for display.</p>
+<span class="kw">var</span> <span class="kw">elapsed</span> = <span class="typ">DateTime</span>.Now - <span class="kw">start</span>;   <span class="cmt">// a TimeSpan</span>
+<span class="fn">print</span>(<span class="str">"Elapsed ms: "</span> + <span class="kw">elapsed</span>.TotalMilliseconds);</div>
+    <p><strong>Operators.</strong> A <code>DateTime</code> takes and gives an interval: <code>at + span</code> and
+    <code>at - span</code> answer a <code>DateTime</code>, <code>later - earlier</code> answers a
+    <code>TimeSpan</code> (the line above), and <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>,
+    <code>&gt;=</code>, <code>==</code> and <code>!=</code> compare two of them.</p>
+    <p>What a <code>DateTime</code> is not is a NUMBER: a cast, a multiplication, or any arithmetic mixing it with a
+    number is refused, and the sentence names the three ways to get a number out of it. <code>.ToOADate()</code> is the
+    serial a spreadsheet counts in (days since 1899-12-30, so <code>46024.25</code> is an afternoon) with
+    <code>DateTime.FromOADate</code> to come back, <code>.Ticks</code> is the tick count since year 1, and
+    <code>.ToString(...)</code> is for display, while <code>span.TotalMilliseconds</code> is the way to time a call.</p>
     <div class="example"><span class="kw">var</span> <span class="kw">at</span> = <span class="kw">new</span> <span class="typ">DateTime</span>(<span class="num">2026</span>, <span class="num">1</span>, <span class="num">2</span>, <span class="num">6</span>, <span class="num">7</span>, <span class="num">0</span>);
 <span class="fn">print</span>(<span class="kw">at</span>.<span class="fn">ToOADate</span>());                 <span class="cmt">// 46024.25486111111</span>
 <span class="fn">print</span>(<span class="typ">DateTime</span>.<span class="fn">FromOADate</span>(<span class="num">46024</span>));     <span class="cmt">// 01/02/2026 00:00:00</span>
@@ -950,10 +957,36 @@ two lines with ""quotes""."</code></div>
   </div>
   <div class="entry-body">
     <p>Represents a point in time relative to UTC with a timezone offset. Unlike <code>DateTime</code>, it unambiguously identifies a single point in time.</p>
-    <div class="syntax"><span class="kw">var</span> <span class="kw">dto</span> = <span class="kw">new</span> <span class="typ">DateTimeOffset</span>(<span class="typ">DateTime</span>.Now, <span class="typ">TimeSpan</span>.FromHours(<span class="num">2</span>));</div>
+    <div class="syntax"><span class="kw">var</span> <span class="kw">dto</span> = <span class="kw">new</span> <span class="typ">DateTimeOffset</span>(<span class="kw">new</span> <span class="typ">DateTime</span>(<span class="num">2026</span>, <span class="num">6</span>, <span class="num">1</span>, <span class="num">9</span>, <span class="num">0</span>, <span class="num">0</span>), <span class="typ">TimeSpan</span>.FromHours(<span class="num">2</span>));</div>
+    <p><strong>The two-argument constructor checks the pair, and the rule is .NET's rather than the engine's.</strong>
+    A <code>DateTime</code> carries a <code>Kind</code>, and the offset has to agree with it: <code>Local</code> needs
+    the machine's own offset for that instant (<code>DateTimeOffset.Now.Offset</code>), <code>Utc</code> needs
+    <code>TimeSpan.Zero</code>, and <code>Unspecified</code> accepts any offset from -14 to +14 hours. So
+    <code>new DateTimeOffset(DateTime.Now, TimeSpan.FromHours(2))</code> works only on a machine sitting at UTC+02:00
+    and is refused everywhere else with
+    <code>Failed to instantiate .NET type 'DateTimeOffset': invalid argument 'offset'</code>. A wall-clock time in a
+    chosen zone is written from an <code>Unspecified</code> <code>DateTime</code> (the shape above), and the machine's
+    own instant is <code>DateTimeOffset.Now</code> or
+    <code>new DateTimeOffset(DateTime.Now, DateTimeOffset.Now.Offset)</code>.</p>
+    <p><strong>Operators.</strong> It takes and gives an interval like a <code>DateTime</code> does:
+    <code>at + span</code> and <code>at - span</code> answer a <code>DateTimeOffset</code>,
+    <code>later - earlier</code> between two of them answers a <code>TimeSpan</code>, and
+    <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>==</code> and
+    <code>!=</code> compare two points in time. Arithmetic mixing it with a NUMBER is refused, and the sentence names
+    the way out (<code>.Ticks</code> or <code>.ToUnixTimeMilliseconds()</code>).</p>
     <div class="example"><span class="typ">DateTimeOffset</span> <span class="kw">now</span> = <span class="typ">DateTimeOffset</span>.Now;
-<span class="fn">print</span>(<span class="kw">now</span>.Offset);  <span class="cmt">// +02:00:00</span>
-<span class="fn">print</span>(<span class="kw">now</span>.UtcDateTime);  <span class="cmt">// UTC DateTime</span></div>
+<span class="fn">print</span>(<span class="kw">now</span>.Offset);              <span class="cmt">// the machine's own offset, for example 01:00:00</span>
+<span class="fn">print</span>(<span class="kw">now</span>.UtcDateTime);         <span class="cmt">// the same instant in UTC</span>
+
+<span class="cmt">// A chosen zone: an Unspecified DateTime accepts any offset.</span>
+<span class="kw">var</span> <span class="kw">paris</span> = <span class="kw">new</span> <span class="typ">DateTimeOffset</span>(<span class="kw">new</span> <span class="typ">DateTime</span>(<span class="num">2026</span>, <span class="num">6</span>, <span class="num">1</span>, <span class="num">9</span>, <span class="num">0</span>, <span class="num">0</span>), <span class="typ">TimeSpan</span>.FromHours(<span class="num">1</span>));
+<span class="fn">print</span>(<span class="kw">paris</span>.Offset);           <span class="cmt">// 01:00:00</span>
+<span class="fn">print</span>(<span class="kw">paris</span>.UtcDateTime.Hour);  <span class="cmt">// 8</span>
+<span class="fn">print</span>((<span class="kw">paris</span> + <span class="typ">TimeSpan</span>.FromHours(<span class="num">1</span>)).Hour);  <span class="cmt">// 10</span>
+
+<span class="cmt">// DateTime.Now is Local, so it pairs with the machine's offset and with nothing else.</span>
+<span class="kw">var</span> <span class="kw">local</span> = <span class="kw">new</span> <span class="typ">DateTimeOffset</span>(<span class="typ">DateTime</span>.Now, <span class="typ">DateTimeOffset</span>.Now.Offset);
+<span class="fn">print</span>(<span class="kw">local</span>.Offset == <span class="kw">now</span>.Offset);  <span class="cmt">// True</span></div>
   </div>
 </div>
 
@@ -964,11 +997,73 @@ two lines with ""quotes""."</code></div>
     <span class="entry-desc">Represents a time interval (duration)</span>
   </div>
   <div class="entry-body">
-    <p>Represents an elapsed duration of time. Can be created from hours, minutes, seconds, or milliseconds.</p>
+    <p>Represents an elapsed duration of time. Can be created from hours, minutes, seconds, or milliseconds, and it is
+    what <code>DateTime - DateTime</code> answers, so a timing idiom is arithmetic rather than tick counting.</p>
     <div class="syntax"><span class="kw">var</span> <span class="kw">ts</span> = <span class="typ">TimeSpan</span>.FromMinutes(<span class="num">5</span>);</div>
     <div class="example"><span class="typ">TimeSpan</span> <span class="kw">ts</span> = <span class="typ">TimeSpan</span>.FromMilliseconds(<span class="num">1500</span>);
 <span class="fn">print</span>(<span class="kw">ts</span>.TotalSeconds);  <span class="cmt">// 1.5</span>
-<span class="kw">var</span> <span class="kw">sum</span> = <span class="typ">TimeSpan</span>.FromMinutes(<span class="num">3</span>) + <span class="typ">TimeSpan</span>.FromSeconds(<span class="num">30</span>);</div>
+<span class="kw">var</span> <span class="kw">sum</span> = <span class="typ">TimeSpan</span>.FromMinutes(<span class="num">3</span>) + <span class="typ">TimeSpan</span>.FromSeconds(<span class="num">30</span>);
+<span class="fn">print</span>(<span class="kw">sum</span>);             <span class="cmt">// 00:03:30</span>
+<span class="fn">print</span>(<span class="kw">sum</span> / <span class="typ">TimeSpan</span>.FromSeconds(<span class="num">30</span>));  <span class="cmt">// 7, and a NUMBER rather than a TimeSpan</span></div>
+    <p><strong>Operators.</strong> The table is C#'s own, so a duration is written as arithmetic: <code>+</code>,
+    <code>-</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>==</code> and
+    <code>!=</code> between two intervals answer an interval or a bool, unary <code>-interval</code> negates one, and
+    a NUMBER scales one (<code>interval * 2</code>, <code>2 * interval</code>, <code>interval / 2</code>), because C#
+    converts the number to <code>double</code>. Two rows are C#'s and surprise a reader, so both are said here rather
+    than discovered: <code>a / b</code> between two intervals answers a <strong>number</strong> (the sum above divided
+    by 30 seconds is 7), and <code>a * b</code> between two intervals does <strong>not exist</strong>, in C# either.
+    <code>%</code> between two intervals does not exist either, so a remainder is taken in <code>.Ticks</code>. A zero
+    divisor is refused as <code>Division by zero</code>, and any shape the table does not answer is refused by name,
+    with the spelling that does work. A .NET struct's OWN operator is consulted before the numeric path, so a type
+    that declares one answers through it (see <code>operator</code>).</p>
+    <p><strong>BigInteger</strong> is an integer type of its own, with the bit family an interval has no use for: see
+    <code>BigInteger</code>.</p>
+  </div>
+</div>
+
+<div class="entry" id="BigInteger" data-entry-id="BigInteger">
+  <div class="entry-header">
+    <span class="entry-name">BigInteger</span>
+    <span class="entry-tag tag-type">type</span>
+    <span class="entry-desc">Integer of any size, with no width to overflow</span>
+  </div>
+  <div class="entry-body">
+    <p>An integer with no fixed width, so it holds a value no <code>long</code> could: a factorial, a running product,
+    an amount of money counted in its smallest unit. .NET <code>System.Numerics.BigInteger</code>. Construct one from a
+    whole number or from text: <code>new BigInteger(42)</code>, <code>new BigInteger("123456789012345678901234567890")</code>.
+    A <code>long</code> above <code>int</code> range keeps its whole value, and an <code>int</code> or a
+    <code>long</code> beside one converts implicitly, so <code>big + 1</code> is a <code>BigInteger</code>.</p>
+    <div class="syntax"><span class="kw">var</span> <span class="kw">big</span> = <span class="kw">new</span> <span class="typ">BigInteger</span>(<span class="num">7</span>);</div>
+    <p><strong>Operators.</strong> The whole family C# defines, because this is an integer rather than an interval:
+    <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code> (integer division, so <code>7 / 3</code>
+    is <code>2</code>), the six comparisons, unary <code>-</code>, <code>++</code> and <code>--</code> (which answer a
+    <code>BigInteger</code>), and the bit family <code>~</code>, <code>&amp;</code>, <code>|</code>, <code>^</code>,
+    <code>&lt;&lt;</code> and <code>&gt;&gt;</code>. A shift behaves as it must for a type with no width: the count is a
+    whole number of any spelling (<code>big &lt;&lt; 3</code>, <code>big &lt;&lt; 3L</code>), a NEGATIVE count shifts the
+    other way, and NOTHING IS MASKED, so <code>big &lt;&lt; 33</code> is 8589934592 times the value where
+    <code>1 &lt;&lt; 33</code> is 2 (the <code>int</code> path masks its count with <code>0x1F</code>). A right shift of a
+    negative value FLOORS: <code>-7 &gt;&gt; 1</code> is <code>-4</code>. Division or <code>%</code> by zero is refused
+    as <code>Division by zero</code>.</p>
+    <p>A zero <code>BigInteger</code> is FALSY, like the integer it is, so <code>if (big)</code> takes the else branch
+    when it holds zero. A place that needs a NUMBER refuses it rather than converting silently, and the sentence names
+    the operators that work and <code>.ToString()</code> for formatting.</p>
+    <div class="example"><span class="kw">var</span> <span class="kw">a</span> = <span class="kw">new</span> <span class="typ">BigInteger</span>(<span class="num">7</span>);
+<span class="kw">var</span> <span class="kw">b</span> = <span class="kw">new</span> <span class="typ">BigInteger</span>(<span class="num">3</span>);
+<span class="fn">print</span>(<span class="kw">a</span> / <span class="kw">b</span>);      <span class="cmt">// 2, integer division</span>
+<span class="fn">print</span>(<span class="kw">a</span> % <span class="kw">b</span>);      <span class="cmt">// 1</span>
+<span class="fn">print</span>(<span class="kw">a</span> &amp; <span class="kw">b</span>);      <span class="cmt">// 3, the bit family works too</span>
+<span class="fn">print</span>(~<span class="kw">a</span>);         <span class="cmt">// -8</span>
+<span class="fn">print</span>(<span class="kw">a</span> &gt; <span class="kw">b</span>);      <span class="cmt">// True</span>
+
+<span class="cmt">// Nothing overflows, and a shift is not masked: 7 shifted by 70 is past any long.</span>
+<span class="kw">var</span> <span class="kw">huge</span> = <span class="kw">new</span> <span class="typ">BigInteger</span>(<span class="num">7</span>) &lt;&lt; <span class="num">70</span>;
+<span class="fn">print</span>(<span class="kw">huge</span>);        <span class="cmt">// 8264141345021879123968</span>
+<span class="fn">print</span>(<span class="typ">BigInteger</span>.Pow(<span class="num">2</span>, <span class="num">100</span>));  <span class="cmt">// 1267650600228229401496703205376</span>
+
+<span class="kw">var</span> <span class="kw">count</span> = <span class="kw">new</span> <span class="typ">BigInteger</span>(<span class="num">41</span>);
+<span class="kw">count</span>++;
+<span class="fn">print</span>(<span class="kw">count</span> + <span class="str">" "</span> + <span class="fn">typeof</span>(<span class="kw">count</span>));  <span class="cmt">// 42 BigInteger</span>
+<span class="kw">if</span> (<span class="kw">new</span> <span class="typ">BigInteger</span>(<span class="num">0</span>)) { <span class="fn">print</span>(<span class="str">"truthy"</span>); } <span class="kw">else</span> { <span class="fn">print</span>(<span class="str">"zero is falsy"</span>); }</div>
   </div>
 </div>
 
@@ -4055,6 +4150,38 @@ p.<span class="typ">Size</span> = <span class="num">5</span>;
 <span class="kw">var</span> <span class="kw">p</span> = <span class="kw">new</span> <span class="typ">Pt</span>(); <span class="kw">p</span>.<span class="kw">X</span> = <span class="num">2</span>;
 <span class="kw">var</span> <span class="kw">q</span> = <span class="kw">new</span> <span class="typ">Pt</span>(); <span class="kw">q</span>.<span class="kw">X</span> = <span class="num">3</span>;
 <span class="fn">print</span>((<span class="kw">p</span> + <span class="kw">q</span>).<span class="kw">X</span>);   <span class="cmt">// 5</span></div>
+    <p><strong>An operator a .NET type already declares</strong> needs no declaration here. A type carrying the CLR
+    <code>op_*</code> member answers through it: <code>new Complex(3, 4) * 2.0</code> is
+    <code>&lt;6; 8&gt;</code>, <code>new Vector2(1, 2) + new Vector2(3, 4)</code> is <code>&lt;4, 6&gt;</code>, and
+    <code>-interval</code> negates a <code>TimeSpan</code>. The operators are <code>+ - * / %</code>,
+    <code>&lt; &lt;= &gt; &gt;=</code>, <code>== !=</code> and unary <code>-</code>, and the one used is chosen from the
+    operand types, the LEFT operand's type first. Both operands convert the way a member call's arguments do, so a
+    type declaring <code>op_Multiply(Money, decimal)</code> answers <code>money * 2</code>. <code>==</code> and
+    <code>!=</code> use the type's own equality when it answers a <code>bool</code>, so a type whose
+    <code>op_Equality</code> ignores a field compares that way; a type declaring neither, or whose <code>==</code>
+    answers something other than a <code>bool</code> (<code>Vector2</code>'s component-wise one), keeps value equality.
+    <code>&amp; | ^</code>, <code>&lt;&lt; &gt;&gt;</code>, <code>~</code>, <code>!</code>, <code>++</code> and
+    <code>--</code> are reached the same way, through <code>op_BitwiseAnd</code>, <code>op_BitwiseOr</code>,
+    <code>op_ExclusiveOr</code>, <code>op_LeftShift</code>, <code>op_RightShift</code>,
+    <code>op_OnesComplement</code>, <code>op_LogicalNot</code>, <code>op_Increment</code> and
+    <code>op_Decrement</code>. <code>++</code> is <code>op_Increment</code>, never <code>+ 1</code>: a type may define
+    them differently, and a type that declares no <code>op_Increment</code> refuses <code>++</code> instead of
+    adding one. The bitwise and shift operators are asked BEFORE the engine's numeric arms, which is C#'s
+    precedence for a non-numeric operand.</p>
+    <p><strong>A CLR class</strong>, not only a struct, is reached when it declares the operator, which C# allows.
+    Two rules bound it: a <code>null</code> operand never reaches an operator (the equality arms keep their own null
+    rule), and <code>string + X</code> keeps the engine's concatenation rule unless <code>X</code>'s type declares
+    <code>op_Addition(X, string)</code> in the operand ORDER the script wrote — so <code>x + "a"</code> can use the
+    operator while <code>"a" + x</code> still concatenates unless X declares that order.</p>
+    <div class="note">A token the type does not declare is refused with the type named:
+    <code>Cannot convert '&lt;3; 4&gt;' to number: a value of type 'Complex' is not a number here: use an operator the
+    type declares (for example '+' when it declares op_Addition), or read its members</code>. Reaching the operator
+    needs the type's metadata: on the shipped (AOT) build that means a type the app already contains, such as
+    <code>Complex</code>, <code>BigInteger</code>, <code>TimeSpan</code> or <code>DateTime</code>, or a type the host
+    compiled in and rooted, because a library loaded at run time is a JIT-build feature (see
+    <code>LoadAssembly</code>).</div>
+    <div class="note"><code>Vector2</code> above is the JIT-build example: its assembly is not one the shipped app
+    carries, so there it answers <code>Type 'Vector2' not defined</code> rather than an operator refusal.</div>
   </div>
 </div>
 <div class="entry" id="record" data-entry-id="record">
@@ -5987,7 +6114,9 @@ p.<span class="typ">Size</span> = <span class="num">5</span>;
   <div class="entry-body">
     <p>Reads the assembly bytes from disk and loads it. Returns the <code>Assembly</code> object. Use with <code>GetType</code> and <code>CreateInstance</code>.</p>
     <div class="syntax"><span class="fn">LoadAssembly</span>(<span class="str">"path/to/lib.dll"</span>);</div>
-    <div class="note">Not available in an AOT-compiled build, which is the shipped one: the call throws a catchable refusal that says why. A script that must work on both asks <code>RuntimeFeature.IsDynamicCodeSupported</code> first, which is <code>False</code> in that build and <code>True</code> under the JIT one. Loading types in a HOST process does not help either: a host cannot hand its own loaded types to a script.</div>
+    <div class="note">Not available in an AOT-compiled build, which is the shipped one: the call throws a catchable refusal that says why. A script that must work on both asks <code>RuntimeFeature.IsDynamicCodeSupported</code> first, which is <code>False</code> in that build and <code>True</code> under the JIT one. Loading types in a HOST process does not help either: a host cannot hand its own loaded types to a script. This is
+    also what limits the operators a CLR type brings (see <code>operator</code>): on the shipped build a type of your
+    own arrives compiled into the app, and the app roots it, so its <code>op_*</code> members survive.</div>
   </div>
 </div>
 
@@ -6101,6 +6230,7 @@ p.<span class="typ">Size</span> = <span class="num">5</span>;
       <tr><td><code>lib.Functions</code></td><td><code>string[]</code></td><td>The export <strong>names</strong> resolved so far, in resolution order. A snapshot  read it again after resolving more. This is what the handle has resolved, <em>not</em> the DLL's export table: listing every export means walking the PE export directory, which is not bound here.</td></tr>
       <tr><td><code>lib.Ordinals</code></td><td><code>int[]</code></td><td>The <strong>ordinals</strong> resolved so far, same snapshot semantics.</td></tr>
     </table>
+    <p>A handle on the module a loaded <strong>plugin</strong>&#39;s door calls through can be read but not released: <code>LoadLibrary</code> of that same file answers the module that is already there, and <code>FreeLibrary</code> refuses by name while the door is up. <code>Bridge.DetachPlugin()</code> then releases the module itself, so the handle dies with it and freeing it releases nothing. That is the one case where a handle this member answers is not yours yet, and the refusal says so instead of leaving a fault behind.</p>
     <p><strong>Invoking an export whose name is only known at runtime</strong>  walking <code>lib.Functions</code>, say  is what <code>lib.Function(name|ordinal)</code> is for: it returns a callable handle. For a name written literally, <code>lib.someName(...)</code> is shorter and does the same thing.</p>
     <p><code>lib.Invoke(name|ordinal, args…)</code> is the one-call shorthand for <code>lib.Function(name).Invoke(args…)</code>, with <code>lib.InvokeRaw</code> / <code>lib.InvokeStr</code> / <code>lib.InvokeDouble</code> beside it  same marshaling, same guess, one line fewer.</p>
     <div class="note"><strong>A pointer carries no signature, so <code>.Invoke()</code> guesses  narrowly, and safely.</strong> A return value that points into <em>committed, readable</em> memory (checked with <code>VirtualQuery</code>) is read as a NUL-terminated C string; anything else comes back as an integer. A small integer is therefore never dereferenced, and a wrong guess cannot kill the process (<code>Invoke()</code> on <code>sqlite3_libversion</code> gives <code>"3.51.3"</code>, on <code>sqlite3_libversion_number</code> gives a number). When you know the signature, say so instead of relying on the guess: <code>.InvokeRaw()</code> (the machine value), <code>.InvokeStr()</code> (read the result as a C string  it throws rather than reading unreadable memory), <code>.InvokeDouble()</code> (unavoidably explicit: a double return is bit-identical to an int64 one, so it cannot be guessed at all). Argument strings are marshaled as UTF-8 and freed after the call, matching <code>CallNative</code>. <strong>Width caveat:</strong> an <code>int</code>-returning export comes back as the 64-bit machine value, so a negative result is not sign-extended  <code>lib.Invoke("sqlite3_stricmp", "abc", "abd")</code> yields <code>4294967295</code>, which is <code>-1</code> as a 32-bit int. Compare with <code>!= 0</code>, or narrow it yourself (<code>x &gt; 2147483647 ? x - 4294967296 : x</code>). The handle exposes <code>.Name</code>, <code>.Ordinal</code> (<code>-1</code> when resolved by name) and <code>.Pointer</code>.</div>
@@ -6149,6 +6279,7 @@ p.<span class="typ">Size</span> = <span class="num">5</span>;
   </div>
   <div class="entry-body">
     <p>Frees a previously loaded native library. Accepts a <code>DynamicLibrary</code> object or a raw <code>IntPtr</code> (for backward compatibility with the old <code>LoadLibrary</code> API).</p>
+    <div class="note"><strong>One module is not a script&#39;s to free: the one a loaded plugin&#39;s door calls through.</strong> A NATIVE plugin (<code>Bridge.LoadNativePlugin</code>) is a DLL <code>LoadLibrary</code> put in this process, so <code>LoadLibrary</code> of that same file answers the module that is already there, and freeing it would unmap code the door still calls. Both spellings are therefore refused by name while the door is up, <code>FreeLibrary</code> of the handle and <code>lib.Free()</code> of the library, because the next <code>Bridge.Call</code> would run into memory the loader has taken away. Call <code>Bridge.DetachPlugin()</code> first: that releases a native plugin&#39;s module, and a handle on it then names nothing, so its <code>Free</code> releases nothing either rather than asking the loader twice.</div>
     <div class="syntax"><span class="fn">FreeLibrary</span>(<span class="kw">lib</span>);                       <span class="cmt">// DynamicLibrary object</span>
 <span class="fn">FreeLibrary</span>(<span class="kw">handle</span>);                    <span class="cmt">// raw IntPtr (numeric)</span>
 <span class="kw">lib</span>.Free();                              <span class="cmt">// method on DynamicLibrary</span></div>
@@ -6617,12 +6748,18 @@ print(sink.lines.Count);      <span class="cmt">// 1</span></div>
     <span class="entry-desc">Globally unique identifier</span>
   </div>
   <div class="entry-body">
-    <p>Represents a 128-bit unique identifier. Create new random Guids or parse from strings.</p>
-    <div class="syntax"><span class="typ">Guid</span>.NewGuid()
+    <p>Represents a 128-bit unique identifier. <code>Guid.CreateVersion7()</code> is the one to reach for: 48 of its
+    bits are the creation time in milliseconds, so the values it produces also SORT by creation (two made inside the
+    same millisecond fall back to their random tail, so their order is not defined). <code>Guid.NewGuid()</code> is the
+    fully random v4 and stays right where unpredictability is the whole point, such as a protocol nonce.</p>
+    <div class="syntax"><span class="typ">Guid</span>.CreateVersion7()   <span class="cmt">// time-ordered, the default choice</span>
+<span class="typ">Guid</span>.NewGuid()           <span class="cmt">// fully random v4, for a nonce</span>
 <span class="typ">Guid</span>.Parse(<span class="kw">str</span>)
 <span class="kw">g</span>.ToString()</div>
-    <div class="example"><span class="kw">var</span> <span class="kw">id</span> = <span class="typ">Guid</span>.NewGuid();
-<span class="fn">print</span>(<span class="kw">id</span>.ToString());  <span class="cmt">// 550e8400-e29b-41d4-a716-446655440000</span></div>
+    <div class="example"><span class="kw">var</span> <span class="kw">id</span> = <span class="typ">Guid</span>.CreateVersion7();
+<span class="fn">print</span>(<span class="kw">id</span>.ToString());          <span class="cmt">// 019a3f5e-8f2c-7a41-9d3b-6c0e2b8f71c4 (the seventh version)</span>
+<span class="fn">print</span>(<span class="kw">id</span>.Version == <span class="num">7</span>);      <span class="cmt">// True</span>
+<span class="fn">print</span>(<span class="typ">Guid</span>.NewGuid().Version);  <span class="cmt">// 4</span></div>
   </div>
 </div>
 
@@ -11067,14 +11204,14 @@ ScriptLangCore.exe --dump-bytecode app.slc --program <span class="cmt">// ...and
 
 <span class="cmt">// host -&gt; script: the handler below answers it</span>
 <span class="fn">Bridge</span>.<span class="fn">Serve</span>(<span class="kw">fun</span> (<span class="kw">req</span>) {
-    <span class="kw">if</span> (<span class="kw">req</span>[<span class="str">"m"</span>] == <span class="str">"invoice.post"</span>) { <span class="kw">return</span> <span class="fn">Bridge</span>.<span class="fn">Ok</span>(<span class="kw">req</span>[<span class="str">"id"</span>], { <span class="str">"posted"</span>: <span class="kw">true</span> }); }
-    <span class="kw">return</span> <span class="fn">Bridge</span>.<span class="fn">Fail</span>(<span class="kw">req</span>[<span class="str">"id"</span>], <span class="str">"NoSuchVerb"</span>, <span class="str">"no "</span> + <span class="kw">req</span>[<span class="str">"m"</span>]);
+    <span class="kw">if</span> (<span class="kw">req</span>.<span class="fn">Verb</span> == <span class="str">"invoice.post"</span>) { <span class="kw">return</span> <span class="fn">Bridge</span>.<span class="fn">Ok</span>(<span class="kw">req</span>.<span class="fn">Id</span>, { <span class="str">"posted"</span>: <span class="kw">true</span> }); }
+    <span class="kw">return</span> <span class="fn">Bridge</span>.<span class="fn">Fail</span>(<span class="kw">req</span>.<span class="fn">Id</span>, <span class="str">"NoSuchVerb"</span>, <span class="str">"no "</span> + <span class="kw">req</span>.<span class="fn">Verb</span>);
 });</div>
     <h4>The document</h4>
-    <p>A request is an object with four members, and only <code>v</code> and <code>m</code> are required:</p>
+    <p>A request is an object with four members, and only <code>m</code> is required:</p>
     <table style="width:100%; font-size:0.85rem; border-collapse:collapse; margin-top:6px;">
       <tr><th style="text-align:left; width:12%;">Member</th><th style="text-align:left; width:16%;">Type</th><th style="text-align:left;">Meaning</th></tr>
-      <tr><td><code>v</code></td><td>number</td><td>The contract version, <code>1</code> today. A request naming another version is refused as <code>UnsupportedVersion</code> instead of being mis-read, which is what the number is for.</td></tr>
+      <tr><td><code>v</code></td><td>number or absent</td><td>The contract version, <code>1</code> today. A request naming another version is refused as <code>UnsupportedVersion</code> instead of being mis-read, which is what the number is for. It may be left out, and an explicit <code>null</code> reads like an absent one: a request that states nothing asks for the version this engine speaks, and the ANSWER always states it, so a caller can still tell which contract replied.</td></tr>
       <tr><td><code>id</code></td><td>any</td><td>The caller&#39;s correlation id, echoed <strong>verbatim</strong> (a string stays a string, a number stays a number), including an explicit <code>null</code>. Absent stays absent rather than being invented. It is how a host matches an answer to its request in a log; no carrier allows two requests outstanding at once, so pipelining would need a batch, which this version does not define.</td></tr>
       <tr><td><code>m</code></td><td>string</td><td>The verb, a dotted name such as <code>invoice.post</code>. <code>m</code> is ADDITIVE: adding a verb is not a version change, while removing or re-meaning one is.</td></tr>
       <tr><td><code>p</code></td><td>object or absent</td><td>The parameters. An object rather than a value, because a contract that allows one huge value invites a payload no reader can bound; anything large is paged inside it. An explicit <code>null</code> means the same as absent.</td></tr>
@@ -11086,25 +11223,62 @@ ScriptLangCore.exe --dump-bytecode app.slc --program <span class="cmt">// ...and
                                   <span class="str">"at"</span>: { <span class="str">"file"</span>: <span class="str">"..."</span>, <span class="str">"line"</span>: <span class="num">12</span>, <span class="str">"col"</span>: <span class="num">5</span> },
                                   <span class="str">"frames"</span>: [<span class="str">"Post [L10:C9]"</span>] } }</div>
 
-    <h4>The nine members</h4>
-    <div class="note"><strong>A full showcase ships as a script:</strong> <code>assets/language/repl/interop/bridge_members_demo.slc</code> uses each of the nine members once, prints the answer that member gave, and asserts it, so the same file is the tour and a pin. Run it with <code>ScriptLangCore.exe assets/language/repl/interop/bridge_members_demo.slc</code>.</div>
+    <h4>The twelve members</h4>
+    <div class="note"><strong>A full showcase ships as a script:</strong> <code>assets/language/repl/interop/bridge_members_demo.slc</code> uses each of the twelve members once, prints the answer that member gave, and asserts it, so the same file is the tour and a pin. Run it with <code>ScriptLangCore.exe assets/language/repl/interop/bridge_members_demo.slc</code>.</div>
         <table style="width:100%; font-size:0.82rem; border-collapse:collapse;">
       <tr><th style="padding:2px 6px; border:1px solid var(--border);">Member</th><th style="padding:2px 6px; border:1px solid var(--border);">Parameters and options</th><th style="padding:2px 6px; border:1px solid var(--border);">What it answers</th></tr>
       <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Version</code></td><td style="padding:2px 6px; border:1px solid var(--border);">No parameters. No options. (a property.)</td><td style="padding:2px 6px; border:1px solid var(--border);">The contract version this build speaks, as a number (<code>1</code>).</td></tr>
-      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Served</code></td><td style="padding:2px 6px; border:1px solid var(--border);">No parameters. No options. (a property.)</td><td style="padding:2px 6px; border:1px solid var(--border);">Whether a handler is registered, so a script can decide before it advertises anything.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Served</code></td><td style="padding:2px 6px; border:1px solid var(--border);">No parameters. No options. (a property.)</td><td style="padding:2px 6px; border:1px solid var(--border);">Whether a handler or a verb table is registered, so a script can decide before it advertises anything.</td></tr>
       <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Hosted</code></td><td style="padding:2px 6px; border:1px solid var(--border);">No parameters. No options. (a property.)</td><td style="padding:2px 6px; border:1px solid var(--border);">Whether a host installed its side, which is what <code>Call</code> needs.</td></tr>
-      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Serve(handler)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">handler</strong>: the function that answers the host's requests: one parameter, the request as a script dictionary, answering the text <code>Ok</code> or <code>Fail</code> builds, or <code>null</code> to stop serving.</td><td style="padding:2px 6px; border:1px solid var(--border);">Nothing. One handler per session, so a second call replaces the first.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Serve(handler)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">handler</strong>: the function that answers the host's requests: one parameter, the request as a <code>BridgeRequest</code> object (<code>Verb</code>, <code>Id</code>, <code>Version</code>, <code>Parameters</code>, and <code>Document</code> for the parsed request), answering the text <code>req.Ok(...)</code> or <code>req.Fail(...)</code> builds for that request, or <code>null</code> to stop serving.</td><td style="padding:2px 6px; border:1px solid var(--border);">Nothing. One serving slot per session, so a second call replaces the first; it is refused when verbs were registered with <code>On</code>, and <code>Serve(null)</code> clears either mode.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>On(verb, handler)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">verb</strong>: a non-empty name such as <code>invoice.post</code>. <strong class="param-label">handler</strong>: a function of one parameter, the request's <code>p</code> (null when the request has none).</td><td style="padding:2px 6px; border:1px solid var(--border);">The <code>Bridge</code> namespace, so registrations chain. The handler's return value becomes <code>r</code>; a thrown <code>Error</code> becomes <code>e</code>, and any other throw keeps the engine's code with its position and frames. An unregistered verb answers <code>NoSuchVerb</code>. Refused when <code>Serve</code> already owns the slot.</td></tr>
       <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Handle(request)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">request</strong>: the request document as UTF-8 text.</td><td style="padding:2px 6px; border:1px solid var(--border);">The response document as text. This is the door <code>slc_invoke</code> and the COM <code>Invoke</code> member call, and what a test drives, so the contract is provable with a stub host.</td></tr>
-      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Call(request)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">request</strong>: the request document as text; <code>id</code> is echoed by the dispatcher, and <code>v</code> and <code>m</code> are required.</td><td style="padding:2px 6px; border:1px solid var(--border);">The host's response document ALREADY PARSED, so a member is read as <code>answer["r"]["n"]</code>. Refused by name when no host installed its side.</td></tr>
-      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Ok(id [, result])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">id</strong>: the correlation id to echo; the dispatcher rewrites it from the request anyway. <strong class="param-label">result</strong>: the value to answer as <code>r</code>; absent answers a document with no <code>r</code>.</td><td style="padding:2px 6px; border:1px solid var(--border);">The success document: <code>ok: true</code> with <code>r</code>.</td></tr>
-      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Fail(id, code, message [, retry | options])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">id</strong>, <strong class="param-label">code</strong>: the non-empty, machine-readable name a client branches on. <strong class="param-label">message</strong>: the non-empty text a human reads. <strong class="param-label">retry</strong>: a boolean, or an options object <code>{ retry, retryAfter, details }</code>. An unknown option or a wrong type is refused by name.</td><td style="padding:2px 6px; border:1px solid var(--border);">The failure document: <code>ok: false</code> with the contract's error object.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Call(request)</code><br><code>Call(verb [, parameters])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">request</strong>: the request document as text, with its own <code>id</code>, <code>v</code> and <code>m</code>. Or <strong class="param-label">verb</strong> and an optional parameters object: the engine writes <code>v</code>, <code>m</code> and <code>p</code> and assigns an id.</td><td style="padding:2px 6px; border:1px solid var(--border);">The raw form answers the host's response document ALREADY PARSED. The verb form answers <code>r</code> directly, and an <code>ok:false</code> answer is thrown as a catchable error whose <code>Value</code> is the host's <code>e</code>. Refused by name when no host installed its side.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>CallEnvelope(verb [, parameters])</code></td><td style="padding:2px 6px; border:1px solid var(--border);">The verb and its optional parameters, as in the verb form of <code>Call</code>.</td><td style="padding:2px 6px; border:1px solid var(--border);">A <code>BridgeEnvelope</code> object: <code>Ok</code> is the verdict, <code>Value</code> the <code>r</code>, <code>Error</code> a <code>BridgeError</code> with <code>Code</code>, <code>Message</code>, <code>Retry</code>, <code>RetryAfter</code> and <code>Details</code>, and <code>Document</code> the envelope as the host wrote it. Typed members rather than string keys, and nothing thrown for a refusal. The name says what comes back where <code>Call</code> answers <code>r</code>; it is not .NET's <code>Try*</code> shape (a boolean, plus an <code>out</code> for the value), which neither member follows. <strong>It never throws for a verb call</strong>: a host's <code>ok: false</code> and a call that cannot be made at all both come back as the envelope, with a code naming which it was (<code>NoHost</code>, <code>BadVerb</code>, <code>BadParams</code>, <code>BadAnswer</code>, <code>IdMismatch</code>), so a caller reads <code>Ok</code>, <code>Error.Code</code> and <code>Error.Message</code> and never wraps the call in a <code>try</code>. <code>Document</code> is null for the failures no host answered. The call's own argument list is checked before dispatch, because an argument list the member cannot read is a mistake in the call rather than an answer about it.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Ok(id [, result])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">id</strong>: the correlation id to echo; the dispatcher rewrites it from the request anyway. <strong class="param-label">result</strong>: the value to answer as <code>r</code>; absent answers a document with no <code>r</code>.</td><td style="padding:2px 6px; border:1px solid var(--border);">The success document: <code>ok: true</code> with <code>r</code>. Inside a <code>Serve</code> handler, <code>req.Ok(result)</code> is the same document with the request's id, which is the spelling to prefer.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Fail(id, code, message [, retry | options])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">id</strong>, <strong class="param-label">code</strong>: the non-empty, machine-readable name a client branches on. <strong class="param-label">message</strong>: the non-empty text a human reads. <strong class="param-label">retry</strong>: a boolean, or an options object <code>{ retry, retryAfter, details }</code>. An unknown option or a wrong type is refused by name.</td><td style="padding:2px 6px; border:1px solid var(--border);">The failure document: <code>ok: false</code> with the contract's error object. <code>req.Fail(code, message [, retry | options])</code> is the same document with the request's id.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Error(code, message [, options])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">code</strong>, <strong class="param-label">message</strong>: non-empty strings. <strong class="param-label">options</strong>: <code>{ retry, retryAfter, details }</code>, refused by name when a key or a type is wrong.</td><td style="padding:2px 6px; border:1px solid var(--border);">A value to <code>throw</code>. A handler that throws it answers <code>ok: false</code> with that <code>code</code> and <code>message</code>, the retry fields, <code>origin: "handler"</code>, and the engine's <code>at</code> and <code>frames</code>.</td></tr>
       <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>FromError(id, error)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">id</strong>, <strong class="param-label">error</strong>: a CAUGHT value: an <code>ErrorInfo</code>, or a <code>{ code, message }</code> dictionary, whose <code>retry</code>, <code>retryAfter</code> and <code>details</code> travel when present.</td><td style="padding:2px 6px; border:1px solid var(--border);">The failure document built from that value instead of invented text, so a failure the script handled reads like one the engine caught. A malformed member is refused by name, and <code>at</code> is left out because a caught value carries no position.</td></tr>
+    </table>
+    <p><strong>Two styles, one wire.</strong> <code>Serve</code> is the raw door: the handler reads the whole request and answers the envelope text the request's own <code>Ok</code> / <code>Fail</code> members build (or <code>Bridge.Ok</code> / <code>Bridge.Fail</code> with an explicit id). <code>On</code> is the verb table: the engine reads <code>v</code>, <code>id</code>, <code>m</code> and <code>p</code>, calls the verb's handler with <code>p</code>, and writes the envelope around its return value, so a script never builds <code>v</code>, <code>id</code>, <code>ok</code> or <code>e</code> itself. The two cannot be mixed in one session; <code>Serve(null)</code> clears either. On the calling side, <code>Call(verb, p)</code> returns <code>r</code> and throws on failure, <code>CallEnvelope(verb, p)</code> answers a typed <code>BridgeEnvelope</code> (<code>Ok</code>, <code>Value</code>, <code>Error</code> and the parsed <code>Document</code>), and the raw <code>Call(request)</code> stays for a batch or a hand-built envelope. The wire format is unchanged.</p>
+
+    <h4>The three typed objects</h4>
+    <p>Three of the values this contract hands a script are objects rather than documents, so a member is spelled rather than looked up as a key, and a misspelling is reported instead of reading as a missing key. All three are script type names, which is what makes them nameable: <code>typeof(answer)</code> answers <code>BridgeEnvelope</code>, <code>answer is BridgeEnvelope</code> is true, and the same holds for the other two. Each of them also keeps the document it came from, which is what <code>Document</code> is for: a member the contract does not name (<code>origin</code>, <code>at</code>, <code>frames</code>, an extension a host and a script agreed on) is still reachable there, and <code>Json.Serialize(answer.Document)</code> is the wire shape a host sees.</p>
+    <p><code>BridgeEnvelope</code>, the answer of <code>Bridge.CallEnvelope</code>:</p>
+    <table style="width:100%; font-size:0.85rem; border-collapse:collapse; margin-top:6px;">
+      <tr><th style="text-align:left; width:16%;">Member</th><th style="text-align:left; width:20%;">Type</th><th style="text-align:left;">What it holds</th></tr>
+      <tr><td><code>Ok</code></td><td><code>bool</code></td><td>The host&#39;s verdict, the envelope&#39;s <code>ok</code>. <code>false</code> means the call was refused, and <code>Error</code> says why; a call that could not be made at all reads <code>false</code> too, with a code naming which it was (<code>NoHost</code>, <code>BadVerb</code>, <code>BadParams</code>, <code>BadAnswer</code>, <code>IdMismatch</code>).</td></tr>
+      <tr><td><code>Value</code></td><td><code>any</code>, or null</td><td>The host&#39;s <code>r</code>: the value the verb answered. Null when the answer carried none, and null on a refusal, because a refusal has no result.</td></tr>
+      <tr><td><code>Error</code></td><td><code>BridgeError</code>, or null</td><td>The host&#39;s <code>e</code> when <code>Ok</code> is false, and null when it is true.</td></tr>
+      <tr><td><code>Document</code></td><td>dictionary, or null</td><td>The envelope exactly as the host wrote it, parsed. Null when the call failed before a host answered, because no host document exists then.</td></tr>
+    </table>
+    <p><code>BridgeError</code>, the refusal an envelope carries in <code>Error</code>, and the shape an <code>e</code> takes when a handler throws <code>Bridge.Error</code>:</p>
+    <table style="width:100%; font-size:0.85rem; border-collapse:collapse; margin-top:6px;">
+      <tr><th style="text-align:left; width:16%;">Member</th><th style="text-align:left; width:20%;">Type</th><th style="text-align:left;">What it holds</th></tr>
+      <tr><td><code>Code</code></td><td><code>string</code></td><td>The machine-readable name to branch on, non-empty, as in <code>NoSuchInvoice</code> or <code>UnknownVerb</code>. A handler&#39;s own code survives here rather than becoming the engine&#39;s enum name.</td></tr>
+      <tr><td><code>Message</code></td><td><code>string</code></td><td>The text a human reads, non-empty.</td></tr>
+      <tr><td><code>Retry</code></td><td><code>bool</code></td><td>Whether the caller may try again.</td></tr>
+      <tr><td><code>RetryAfter</code></td><td><code>number</code></td><td>How long to wait before retrying, in milliseconds. <code>0</code> means the host stated none, never "retry now", because the contract&#39;s <code>retryAfter</code> is optional.</td></tr>
+      <tr><td><code>Details</code></td><td><code>any</code>, or null</td><td>Whatever the host attached to <code>details</code>, and null when it attached none.</td></tr>
+    </table>
+    <p><code>BridgeRequest</code>, the request a <code>Bridge.Serve</code> handler receives, which also builds the answer because the id an envelope has to echo is the request&#39;s own:</p>
+    <table style="width:100%; font-size:0.85rem; border-collapse:collapse; margin-top:6px;">
+      <tr><th style="text-align:left; width:16%;">Member</th><th style="text-align:left; width:20%;">Type</th><th style="text-align:left;">What it holds</th></tr>
+      <tr><td><code>Verb</code></td><td><code>string</code></td><td>The wire&#39;s <code>m</code>, a non-empty dotted name such as <code>invoice.post</code>. Always present, because the dispatcher refuses a request that names none.</td></tr>
+      <tr><td><code>Id</code></td><td><code>any</code>, or null</td><td>The caller&#39;s correlation id, the wire&#39;s <code>id</code>, echoed verbatim: a string stays a string, a number stays a number, an explicit null stays null. Null when the caller stated none, which is legal.</td></tr>
+      <tr><td><code>Version</code></td><td><code>number</code></td><td>The contract version the request asked for, or the one this engine speaks when the request left it out.</td></tr>
+      <tr><td><code>Parameters</code></td><td>dictionary, or null</td><td>The wire&#39;s <code>p</code>. Null when the request carried none, and an explicit <code>null</code> reads the same, so a handler tests <code>== null</code> rather than <code>ContainsKey</code>.</td></tr>
+      <tr><td><code>Document</code></td><td>dictionary</td><td>The request exactly as the host wrote it, for a member the contract does not name. The typed members above are read from this same document, so the two cannot disagree.</td></tr>
+      <tr><td><code>Ok(result)</code></td><td><code>string</code></td><td>The success document with this request&#39;s id: the text <code>Bridge.Ok</code> builds for that id. A request that carried no id gets an answer with none.</td></tr>
+      <tr><td><code>Fail(code, message [, retry | options])</code></td><td><code>string</code></td><td>The failure document with this request&#39;s id: the text <code>Bridge.Fail</code> builds for it. A malformed option is refused by name, and that refusal names <code>req.Fail</code>.</td></tr>
+      <tr><td><code>FromError(error)</code></td><td><code>string</code></td><td>The failure document built from a CAUGHT value instead of invented text, with this request&#39;s id, so a handler answers its own <code>catch</code> without building a second shape.</td></tr>
     </table>
     <div class="note"><strong>No re-entry on the same session.</strong> A session serves one host request at a time. A handler MAY call the host with <code>Bridge.Call</code>; what is refused is <code>Bridge.Handle</code> on its own session (it would be a loop), a verb issued from inside a host callback (a run posted there would wait on itself), and a <code>Bridge.Call</code> the host answers by calling back into the same session. A host that needs to ask a question while answering one posts it to another thread.</div>
 
     <h4>What a handler can count on</h4>
     <p>A handler that <strong>throws</strong> is not a bug in the contract: the dispatcher turns it into <code>ok: false</code> with the engine&#39;s own code, message, position and frames, which is why a verb a script did not anticipate still answers a document a host can read. A handler that answers <strong>something that is not an envelope</strong> (a plain string, nothing at all, an object with no boolean <code>ok</code>) is reported as <code>HandlerReturnedNonEnvelope</code> rather than forwarded to a host that would have to guess, and the same code covers an <code>ok:true</code> answer carrying <code>e</code>, an <code>e</code> that is not an object, and an error whose <code>code</code> or <code>message</code> is missing or not a non-empty string. An <code>ok:false</code> answer carrying <code>r</code> has the <code>r</code> dropped, because exactly one of the two shapes is present. The error&#39;s <code>origin</code> is forced by the dispatcher: <code>"engine"</code> when it or the engine built the failure, <code>"handler"</code> when the handler answered it. And the response&#39;s <code>v</code> and <code>id</code> are the dispatcher&#39;s, rewritten from the request by construction, <code>null</code> included, so a handler cannot echo the wrong id even by accident.</p>
-    <p>An absent <code>p</code> is legal, and an explicit <code>null</code> means the same, so a handler that indexes <code>req["p"]</code> unconditionally refuses a request the contract allows. Guard it: <code>var payload = req.ContainsKey("p") ? req["p"] : null;</code>. An absent <code>id</code> is legal too, which is why a handler echoes <code>req["id"]</code> rather than assuming one is there; a request that sent <code>"id": null</code> gets <code>"id": null</code> back.</p>
+    <p>An absent <code>p</code> is legal, and an explicit <code>null</code> means the same, which the typed request reads for you: <code>req.Parameters</code> is the object or <code>null</code>, and <code>req.Id</code> is <code>null</code> when the caller stated none, so neither needs a <code>ContainsKey</code> guard and a handler echoes <code>req.Id</code> as it stands. A request that sent <code>"id": null</code> gets <code>"id": null</code> back. <code>req.Document</code> is the parsed request itself, for a member the contract does not name, and <code>req.Version</code> is the version the request asked for (the one this engine speaks when it named none).</p>
+    <p><strong>The request answers for itself.</strong> <code>req.Ok(value)</code>, <code>req.Fail(code, message [, retry | options])</code> and <code>req.FromError(error)</code> build the response document with the id taken from the request, so a handler writes <code>return req.Fail("Conflict", "already posted");</code> and never restates <code>req.Id</code> or writes the envelope by hand. Each is the namespace member of the same name with the request's id supplied: the text is identical, a request that carried no id gets an answer with none, and a refused option names <code>req.Fail</code> rather than <code>Bridge.Fail</code>. Only the request a <code>Serve</code> handler receives has them, because only that object knows which request it is answering.</p>
     <p><strong>Paging and retrying are the application&#39;s contract, not the engine&#39;s.</strong> A large result is paged inside <code>p</code> and <code>r</code> with the reserved <code>$page</code>, <code>$next</code> and <code>$done</code> keys, so a generic client can page a verb that opts in. <code>retry: true</code> invites the host to send the same request again: the handler owns making that safe, and <code>id</code> is the correlation handle and the natural idempotency key, because the dispatcher does not dedupe. No carrier allows two requests outstanding at once, so a host sends its requests in sequence; pipelining would need a batch, which this version does not define.</p>
 
     <h4>How the two doors are carried</h4>
@@ -11114,6 +11288,27 @@ ScriptLangCore.exe --dump-bytecode app.slc --program <span class="cmt">// ...and
       <tr><td><strong>COM</strong></td><td>The same object that runs scripts has an <code>Invoke(requestJson)</code> member: one argument, one document in, one document out. It forwards to the script door above rather than to a second dispatcher, so a VBA client and a C host speak one contract.</td></tr>
       <tr><td><strong>.NET</strong></td><td>A host that holds the interpreter directly sets <code>HostBridge</code>, a <code>Func&lt;string, string?&gt;</code>, which is the same field <code>slc_set_bridge</code> writes. There is no second implementation of the rule.</td></tr>
     </table>
+    <h4>Opening a JIT plugin from a script</h4>
+    <p>A plugin arrives one of two ways, and both end in the same loader. A MANAGED plugin is a class library plus its own <code>runtimeconfig.json</code>, and reaching it means starting a SECOND CoreCLR for it. A NATIVE plugin is an ordinary DLL that exports <code>PluginInit</code>: the OS loads it and no runtime is started at all. Which one a file is comes from the FOLDER, not from sniffing the image: <code>&lt;name&gt;.runtimeconfig.json</code> beside the DLL means managed (that file is what names the plugin&#39;s own framework), and its absence means a native DLL.</p>
+    <div class="syntax"><span class="cmt">// a HOST opens it: the prefix, and everything after the second argument is the ordinary command line</span>
+<span class="cmt">// ScriptLangCore.exe --plugin Plugin.dll Namespace.Type app.slc</span>
+<span class="cmt">// ScriptLangCore.exe --plugin NativePlugin.dll native app.slc      (a native plugin has no entry TYPE)</span>
+
+<span class="cmt">// the SCRIPT opens it: no command line at all, and `./` means "beside this script"</span>
+<span class="fn">Bridge</span>.<span class="fn">LoadJitPlugin</span>(<span class="str">"./Plugin.dll"</span>);                      <span class="cmt">// managed: the entry type is discovered</span>
+<span class="fn">Bridge</span>.<span class="fn">LoadJitPlugin</span>(<span class="str">"./Plugin.dll"</span>, <span class="str">"Namespace.Type"</span>);  <span class="cmt">// the same load, stated</span>
+<span class="fn">Bridge</span>.<span class="fn">LoadNativePlugin</span>(<span class="str">"./NativePlugin.dll"</span>);              <span class="cmt">// native: no type exists</span>
+<span class="kw">var</span> <span class="kw">answer</span> = <span class="fn">Bridge</span>.<span class="fn">Call</span>(<span class="str">'{"v":1,"m":"add","p":{"a":20,"b":22}}'</span>);</div>
+    <table style="width:100%; font-size:0.82rem; border-collapse:collapse;">
+      <tr><th style="padding:2px 6px; border:1px solid var(--border);">Member</th><th style="padding:2px 6px; border:1px solid var(--border);">Parameters and options</th><th style="padding:2px 6px; border:1px solid var(--border);">What it answers</th></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>Plugin</code></td><td style="padding:2px 6px; border:1px solid var(--border);">No parameters. No options. (a property.)</td><td style="padding:2px 6px; border:1px solid var(--border);">Whether the door <code>Call</code> uses was installed by <code>LoadJitPlugin</code> or <code>LoadNativePlugin</code> rather than by a host. <code>Hosted</code> answers whether there is a door at all, so both are asked when the question is which kind it is.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>LoadJitPlugin(assembly [, entryType])</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">assembly</strong>: the plugin DLL, resolved through the engine&#39;s ONE path rule, so <code>./Plugin.dll</code> is beside the running script. <strong class="param-label">entryType</strong>: optional, <code>Namespace.Type</code> (the loader qualifies it with the assembly name) or <code>Namespace.Type, AssemblyName</code> as written. Left out, it is the DLL&#39;s one type with a public static <code>[UnmanagedCallersOnly]</code> method named <code>PluginInit</code>, and none or several is refused by name asking for this argument.</td><td style="padding:2px 6px; border:1px solid var(--border);"><code>true</code>, and from then on <code>Call</code> reaches the plugin. A load failure (a missing DLL, a wrong or undiscoverable entry type, a plugin speaking another ABI) is a CATCHABLE script error, not a process exit. What it does when something is already loaded is the interesting half, and it has three answers: asking for <strong>the same plugin twice</strong> starts nothing and logs a <strong>warning</strong> (a runtime is not unloadable, so the door that exists is the only one); asking for <strong>a different plugin</strong> while one is loaded is an <strong>error</strong> naming <code>DetachPlugin</code>, because a second runtime would be started and the first would stay; and a <strong>host&#39;s</strong> bridge is an error too, because what a host installed is not a script&#39;s to replace.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>LoadNativePlugin(assembly)</code></td><td style="padding:2px 6px; border:1px solid var(--border);"><strong class="param-label">assembly</strong>: the NATIVE plugin DLL, resolved the same way. It takes no entry type, because the exported <code>PluginInit</code> fills the table itself.</td><td style="padding:2px 6px; border:1px solid var(--border);"><code>true</code>, and from then on <code>Call</code> reaches the plugin. A DLL with a <code>runtimeconfig.json</code> beside it is a MANAGED plugin and is refused by name, naming <code>LoadJitPlugin</code>. The three "already loaded" answers are the same as <code>LoadJitPlugin</code>&#39;s, because the door rules are one implementation, and the SAME plugin asked for twice warns that its module is still mapped. This is the kind whose module can be RELEASED: <code>DetachPlugin</code> frees it, so the file can be deleted, replaced or loaded again.</td></tr>
+      <tr><td style="padding:2px 6px; border:1px solid var(--border);"><code>DetachPlugin()</code></td><td style="padding:2px 6px; border:1px solid var(--border);">No parameters. Refused by name when there is no plugin door to drop, or when the door is the HOST&#39;s.</td><td style="padding:2px 6px; border:1px solid var(--border);"><code>true</code>. <code>Hosted</code> goes false, <code>Call</code> is refused by name again, and another plugin may be loaded. What it gives BACK depends on the kind, because that is a fact about the loader: a <strong>native</strong> plugin is a plain DLL this process loaded, so its module is released and the file can be deleted, replaced or loaded again; a <strong>managed</strong> plugin is <strong>not</strong> unloaded, because closing hostfxr leaves the second CoreCLR loaded and its entry points working, so its runtime and memory stay for the life of the process. Neither stops a thread or a callback the plugin started, which is why anything that must be STOPPED belongs in a child process.</td></tr>
+    </table>
+    <p><strong>The entry type can be left out.</strong> A managed plugin declares one public static <code>[UnmanagedCallersOnly]</code> method named <code>PluginInit</code>, and that is what the loader resolves. Given only a path, <code>LoadJitPlugin</code> reads the DLL&#39;s metadata for that method: exactly one type declaring it is the entry type, while none or several is refused by name and asks for the second argument. A stated type is <code>Namespace.Type</code>, which the loader qualifies with the assembly name, or <code>Namespace.Type, AssemblyName</code> as written.</p>
+    <div class="note"><strong>Nothing unloads a MANAGED plugin&#39;s runtime, so there is no <code>UnloadPlugin</code>.</strong> Closing hostfxr does not unload it: the runtime stays loaded, the module count is unchanged and the plugin&#39;s entry points keep working. A NATIVE plugin is the one kind that can go away, because the operating system loaded it: <code>DetachPlugin</code> releases its module, and the file can be deleted or replaced afterwards. What both give is the half a script can honestly have, which is where the verbs are routed. A plugin that must be stopped, unloaded or untrusted belongs in a CHILD PROCESS, which is also the answer for a plugin that throws across its own entry point: that ends the process, because the two runtimes share an address space and a crash domain. And while a native door is up, a script may not free that module itself: <code>FreeLibrary</code> of its handle, or <code>lib.Free()</code> of a library loaded from the plugin&#39;s own file, is refused by name, because the door calls through pointers inside that image. After the detach those handles name nothing: the engine released the module, so a free of one releases nothing rather than asking the loader twice. The embed page&#39;s <a href="../embed/howto.html#limits">limits section</a> carries the whole recap, one row per leg: what is freeable, what is not, and what releases it.</div>
+    <p>This is not a new privilege class: a script already reaches <code>LoadLibrary("any.dll")</code> and <code>Process.Start("any.exe")</code>, so opening a second runtime sits where those do. The runnable sample is <code>assets/language/samples/jitplugin/</code>, one file per kind: <code>plugin_jit_demo.slc</code> loads the managed plugin itself when no <code>--plugin</code> prefix did, runs three verbs, checks each answer and shows the detach, and <code>plugin_native_demo.slc</code> does the same against <code>JitPluginNative.dll</code>, with <code>utf8</code> and <code>long</code> beside those verbs because they are the two answers a native plugin has to get right by hand. <code>bash src/build/jitplugin-check.sh</code> pins both doors.</p>
     <p><strong>Two kinds of failure, kept apart on purpose.</strong> A CONTRACT failure (an unknown verb, another version, a handler that threw) is a normal answer and travels INSIDE the document as <code>ok: false</code>, so a host reads one shape. A TRANSPORT failure (no such session, a session already running, a freed handle) is not an answer at all: the ABI answers a negative status with the reason on <code>slc_last_error</code>, because putting a sentence in a buffer the host parses as JSON is how a binding ends up reporting a parse error instead of the real problem. Over COM, where a member has no status to answer, a transport failure is the sentence in <code>LastError</code>. A dedicated page, <a href="../bridge/howto.html">docs/bridge/howto.html</a>, takes the contract and all five carriers end to end, with a complete sample for each: C, C#, Python, PowerShell and COM.</p>
     <p><code>assets/language/repl/interop/bridge_contract_test.slc</code> is this contract pinned against an in-process stub host: the version, the verb, the parameters object including an explicit null, a handler being served, a handler&#39;s own failure, a re-entrant call and a handler calling the host while serving, the answer&#39;s whole shape (exactly one of <code>r</code> or <code>e</code>, and the error&#39;s <code>code</code>, <code>message</code>, <code>origin</code>, <code>retryAfter</code> and <code>details</code>), a response that names somebody else&#39;s <code>id</code> and version, and the id echoed (anonymous, numeric, string and null). The two carriers have their own proofs: <code>src/embed/Program.cs</code> drives both doors over a real function pointer, and the COM member is driven from a registered COM client.</p>
   </div>

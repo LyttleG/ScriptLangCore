@@ -130,6 +130,11 @@
          well (the engine's `obj/**` exclusion is stated against the ROOT intermediate directory, not against a nested
          project's). -->
     <Compile Remove="src/embed/**" />
+    <!-- src/jitplugins/ is the PROJECT that pins the JIT-plugin loader (`src/Host/JitPlugins/`): a fixture class
+         library (the plugin side) and an AOT console host (the loader's side). Neither belongs in the engine's
+         compilation, and the fixture would otherwise be a second assembly's worth of types inside it (CS0017 for its
+         own top-level statements, CS0579 for its generated attributes). Same reason and same shape as src/embed/. -->
+    <Compile Remove="src/jitplugins/**" />
     <!-- A PUBLISHED FOLDER IS OUTPUT, NEVER SOURCE. `publish-aot\` holds a copy of `tools\`, and (from the years when the
          DLL leg published into it) copies of generated `AssemblyInfo.cs` files, so a default `**/*.cs` glob compiled
          them: CS0579 "attribute declared twice" and CS0101 "two Program.cs" both came from here, once a `tools\`

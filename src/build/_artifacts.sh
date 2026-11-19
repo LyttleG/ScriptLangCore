@@ -28,11 +28,14 @@ SLC_REMEDY_ALL="cmd /c compile_aot.bat   (republishes the exe, the DLL and the l
 # pruned because a nested project writes its intermediates INSIDE src/, and counting one refused a fresh publish
 # (measured: `src/embed/launcher/obj/Launcher/net11.0/win-x64/EmbedLauncher.AssemblyInfo.cs` named as the reason a
 # correct binary was stale).
+# `src/jitplugins/` is pruned for the same reason, and it is the twin of `src/embed/`: the FIXTURE is a JIT plugin and
+# the CHECK is a NativeAOT host, two programs of their own, so editing the pin must not declare the engine stale (it
+# did, once, which is what earned this line).
 #   slc_engine_newest_source <artifact> [root]   -> the first source newer than <artifact>, or nothing (rc 1)
 slc_engine_newest_source() {
   local artifact="$1" root="${2:-.}"
   find "$root/src" \
-       \( -path "$root/src/embed" -o -name obj -o -name bin \) -prune -o \
+       \( -path "$root/src/embed" -o -path "$root/src/jitplugins" -o -name obj -o -name bin \) -prune -o \
        -name '*.cs' -newer "$artifact" -print -quit 2>/dev/null
 }
 

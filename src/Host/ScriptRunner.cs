@@ -167,9 +167,13 @@ internal static class ScriptRunner
     /// (`Program.RunFile`). Owning the interpreter is the runner's business here as it is for <see cref="RunFile"/>,
     /// and an interpreter HANDLE is a `ref struct` (it cannot travel into a continuation, measured as CS8175), so the
     /// wait and the release both happen here, on the thread that owns it.</summary>
-    internal static RunAnswer RunFileAwaiting(string fullPath, string context = "RunFile")
+    /// <param name="attach">Runs on the interpreter this call CREATED, before the run starts, which is the one moment a
+    /// caller can hand it something the run must already have: `--plugin` installs the plugin door here, because a
+    /// file run creates its own interpreter and a sugar-free API for "the interpreter of this run" does not exist.</param>
+    internal static RunAnswer RunFileAwaiting(string fullPath, string context = "RunFile", Action<Interpreter>? attach = null)
     {
         using var handle = InterpreterManager.Create(caseSensitive: true, context: context);
+        attach?.Invoke(handle.Instance);
         return Await(RunFileInAsync(handle.Instance, fullPath));
     }
 
@@ -182,8 +186,7 @@ internal static class ScriptRunner
     /// per process. The `Result` read after it is free: the task is complete by then.</summary>
     internal static RunAnswer Await(Task task)
     {
-        task.WaitBlocking("run entry", 0, 0);
-        return task.Result is RunAnswer answer
+        return Interpreter.WaitForValue(task, "run entry", 0, 0) is RunAnswer answer
             ? answer
             : RunAnswer.Of(new RunOutcome
             {
@@ -198,10 +201,7 @@ internal static class ScriptRunner
     /// task and this posted work blocks on the run's, so a reader of the census sees `run entry` twice per CLI run and
     /// nothing else from the engine.</summary>
     private static ScriptResult? AwaitRun(Task run)
-    {
-        run.WaitBlocking("run entry", 0, 0);
-        return run.Result is ScriptResult result ? result : null;
-    }
+        => Interpreter.WaitForValue(run, "run entry", 0, 0) is ScriptResult result ? result : null;
 
     /// <summary>ONE statement of "a run as a Task", so the two twins above cannot disagree about the posting, the
     /// completion or the failure rule. The answer travels as the Task's RESULT, because a run that failed is still an
@@ -341,7 +341,10 @@ internal static class ScriptRunner
                 // `return <value>` IS the script's answer, which the source run and the SQL door both report. Without
                 // it the VM-direct exit normalises the answer to null and `select slc_file('x.slcbc')` loses it while
                 // `select slc_file('x.slc')` keeps it.
-                var value = itp.InvokeScriptFunction(entry, [], 0, 0, takeVoidAnswer: true);
+                // AND IT IS THE RUN ENTRY THAT AWAITS: a top-level `await` makes the entry an async body, and
+                // `InvokeRunEntry` is the one door that waits for it (see its doc: the shape a C# entry point uses
+                // for an `async Main`).
+                var value = itp.InvokeRunEntry(entry, takeVoidAnswer: true);
                 itp.InvokeExitHandlers();
                 // ...AND A TASK NOBODY AWAITED IS THE RUN'S OTHER END-OF-RUN OWING (see
                 // Interpreter.ReportUnobservedTaskFaults): reading `Environment.ExitCode` below is what turns its

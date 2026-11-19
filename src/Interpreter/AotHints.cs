@@ -141,6 +141,12 @@ internal partial class Interpreter
     [DynamicDependency(AvoidAotTrim, typeof(IPAddress))]
     [DynamicDependency(AvoidAotTrim, typeof(Dns))]
     [DynamicDependency(AvoidAotTrim, typeof(System.Numerics.BigInteger))]
+    // ROUTE B's pin (docs/reasonix/plans/2026-11-17-clr-struct-operators.md): Complex is a CLR struct whose own
+    // operators a script can now use, and its assembly is the one BigInteger already loads, so this entry costs
+    // the type's members rather than a new assembly. BOTH halves are needed, which was measured: the attribute
+    // keeps the metadata, and the `typeof` touch in AotCompilerHint is what LOADS the assembly (a rooted type
+    // nothing touches, such as Point, still answers "Type 'Point' not defined").
+    [DynamicDependency(AvoidAotTrim, typeof(System.Numerics.Complex))]
     // The three CURATED namespaces answer the CLR surface behind them (File over System.IO.File, and the same for
     // Directory and Path), so a member the engine never registered is resolved by REFLECTION on these types: measured,
     // without these entries the JIT build resolved File.ReadAllTextAsync while the AOT publish kept reporting
@@ -221,6 +227,12 @@ internal partial class Interpreter
     [DynamicDependency(AvoidAotTrim, typeof(UnboxedScriptHashSet<>))]
     [DynamicDependency(AvoidAotTrim, typeof(HashSet<>))]
     [DynamicDependency(AvoidAotTrim, typeof(ScriptResult))]
+    // A host's verb answer is a BridgeEnvelope (with a BridgeError inside it) and a SCRIPT reads `Ok`, `Value`,
+    // `Error.Code` and the rest BY NAME: nothing managed calls them, so the trimmer would remove every member and the
+    // SHIPPED build would answer "Property 'Ok' not found" for a type that works on the JIT one.
+    [DynamicDependency(AvoidAotTrim, typeof(BridgeEnvelope))]
+    [DynamicDependency(AvoidAotTrim, typeof(BridgeError))]
+    [DynamicDependency(AvoidAotTrim, typeof(BridgeRequest))]
     // The generic event layer (`Events.Create`): a script reads `Subscribe`/`Next`/`Count` and friends BY NAME, which
     // is reflection over this type's public members, so the trimmer has to be told. `Interfaces` in the flag set is the
     // half that matters for the pull side: the engine's `await foreach` drive finds `IAsyncEnumerable<object?>` by
@@ -460,6 +472,7 @@ internal partial class Interpreter
             typeof(IPAddress),
             typeof(Dns),
             typeof(System.Numerics.BigInteger),
+            typeof(System.Numerics.Complex),
             // `RuntimeFeature` is what a script asks "can this build load code at run time?" with, which is the ONE
             // question the shipping artifact answers no to and every other answer is a refusal it has to catch. The
             // engine itself uses the type five times (the depth cap, the VM's frame cap, `LoadAssembly`'s guard and

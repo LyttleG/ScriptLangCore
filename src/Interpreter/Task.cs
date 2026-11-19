@@ -141,6 +141,13 @@ public sealed class Task
         }
     }
 
+    /// <summary>The value a task ALREADY produced: the READ that follows a wait, and never a wait of its own.
+    /// <see cref="Result"/> is the script-facing door and it WAITS (see its getter above), which is right for a
+    /// script and wrong inside a driver that has just waited for the same task: `Wait` + `Result` there would count
+    /// one wait twice and read like a blocking read. Only call this when the task is complete, which a
+    /// <see cref="Interpreter.WaitForValue"/> caller has guaranteed.</summary>
+    internal object? ValueAfterWait() => _completion.Task.GetAwaiter().GetResult();
+
     // ── Completion ──
     public void SetResult(object? result = null) => _completion.TrySetResult(result);
 
@@ -361,7 +368,7 @@ public sealed class Task
                 outer.SetException(fault!);
                 return;
             }
-            outer.SetResult(done.Result);
+            outer.SetResult(done.GetAwaiter().GetResult());
         }, global::System.Threading.Tasks.TaskScheduler.Default);
 
     /// <summary>The exception a collection of failures becomes: the failure ITSELF when there is one, so a

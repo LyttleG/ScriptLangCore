@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE HOST SIDE of the JIT-plugin loader's pin. It is NativeAOT on purpose: the loader exists so that an
+       AOT-compiled process can reach JIT code, so a JIT harness would test the wrong shape. It references NOTHING
+       from the engine project: the loader's sources are COMPILED IN by link, which is how this repository measures a
+       shipped file rather than a copy of it (`src/build/jitplugin-check.sh` builds and runs it). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>JitPluginCheck</AssemblyName>
+    <RootNamespace>JitPluginCheck</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The shipped loader, by link: same files, same namespace, no engine dependency to drag in. -->
+    <Compile Include="../../Host/JitPlugins/*.cs" Link="JitPlugins/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

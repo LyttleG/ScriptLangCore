@@ -9,7 +9,7 @@ internal static partial class Program
     /// nothing. Exit code: the run's own exit() code when the program ended with one (0 included, which is
     /// what `exit(CheckFailed())` answers for a suite that passed), 1 refused (no entry) or the run failed,
     /// 2 no such file.</summary>
-    private static void RunBytecodeBundle(string path)
+    private static void RunBytecodeBundle(string path, IPluginBridge? plugin = null)
     {
         var fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath))
@@ -20,7 +20,9 @@ internal static partial class Program
         }
 
         using var handle = InterpreterManager.Create(caseSensitive: true, context: "BundleRun");
-        // The LOAD can refuse a bundle: a body that references a type this environment does not have (measured:
+        // The plugin reaches a BUNDLE run the same way it reaches a file: the entry is a script body, and its
+        // `Bridge.Call` asks the session's `HostBridge` (see PluginSession).
+        if (plugin is not null) PluginSession.Attach(handle.Instance, plugin);
         // a stripped bundle of a program declaring an interface died here with "type 'IShape' referenced by the
         // bytecode is not available in this environment"), a body the verifier rejects, a blob from another
         // version. It goes through the same one report path as a failed entry, because a shipped binary must
@@ -112,7 +114,7 @@ internal static partial class Program
     {
         try
         {
-            return itp.InvokeScriptFunction(entry, [], 0, 0);
+            return itp.InvokeRunEntry(entry, takeVoidAnswer: true);
         }
         catch (Exception ex)
         {

@@ -712,6 +712,9 @@ internal sealed class NativeWebSocketClient
 
     private bool DoHandshake(string host, int port)
     {
+        // A v4 GUID on purpose: this is a PROTOCOL NONCE (`Sec-WebSocket-Key`), where unpredictability is what
+        // matters, and v4 carries 122 random bits against v7's 74. Everywhere the value is an IDENTITY, this
+        // engine uses Guid.CreateVersion7() (time-ordered, so it also sorts by creation).
         var key = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
         var request = Encoding.UTF8.GetBytes(
             $"GET / HTTP/1.1\r\n" +

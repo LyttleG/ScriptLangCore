@@ -740,6 +740,7 @@ internal partial class Interpreter
         float f => Math.Abs(f) > Epsilon,
         double d => Math.Abs(d) > Epsilon,
         decimal dec => dec != 0,
+        System.Numerics.BigInteger big => !big.IsZero,
         _ => true
     };
 

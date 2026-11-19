@@ -1111,8 +1111,8 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     /// </summary>
     private object? AwaitHandlerAnswer(object? answer) => answer switch
     {
-        ScriptLangCore.Task scriptTask => scriptTask.Result,
-        System.Threading.Tasks.Task clrTask => ToScriptTask(clrTask).Result,
+        ScriptLangCore.Task scriptTask => WaitForValue(scriptTask, "async handler", 0, 0),
+        System.Threading.Tasks.Task clrTask => WaitForValue(ToScriptTask(clrTask), "async handler", 0, 0),
         _ => answer
     };
 
@@ -2863,6 +2863,12 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
                 // loaded, which is what "loaded by name, one instance per process" means.
                 if (Interpreter.IsNameBound(kvp.Key))
                     continue;
+                // A DOORED MODULE IS THE SAME KIND OF EXCEPTION, for the same reason: a native plugin's image belongs to
+                // the session's door, and the free that ends a run must not unmap code the door still calls through
+                // (`Bridge.DetachPlugin` is what releases it). The set below is cleared anyway, so the run still starts
+                // from the state at invocation.
+                if (PluginModules.IsDoored(kvp.Value.Handle))
+                    continue;
                 kvp.Value.Free();
             }
             _loadedLibraries.Clear();
@@ -3250,6 +3256,10 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
             // cleared, so each iteration still starts from the state at invocation; the module stays
             // loaded, which is what "loaded by name, one instance per process" means.
             if (Interpreter.IsNameBound(kvp.Key))
+                continue;
+            // A DOORED MODULE IS NOT THE RUN'S TO RELEASE (see the twin loop above): a native plugin's image belongs to
+            // the session's door, which releases it at `Bridge.DetachPlugin`.
+            if (PluginModules.IsDoored(kvp.Value.Handle))
                 continue;
             kvp.Value.Free();
         }
@@ -5319,6 +5329,17 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     internal static void WaitForTask(Task task, string site, int line, int column)
         => task.WaitBlocking(site, line, column);
 
+    /// <summary>Waits for an awaited task at a NAMED site and answers its VALUE, in ONE door. This is the shape
+    /// engine code uses instead of `Wait`/`Result` on a <see cref="Task"/>: `Result`'s getter WAITS (see it in
+    /// Task.cs), so `Wait` + `Result` counts one wait twice and reads like a blocking read, and `Wait()` alone is a
+    /// wait nothing names in the census. `ValueAfterWait` is the read that follows: the wait above completed the
+    /// task (or rethrew its fault), so it cannot block.</summary>
+    internal static object? WaitForValue(Task task, string site, int line, int column)
+    {
+        WaitForTask(task, site, line, column);
+        return task.ValueAfterWait();
+    }
+
     /// <summary>Called by a top-level `await` inside a resumable run: records the await in the statement's journal, then
     /// registers the resume on the awaited task and unwinds to the driver. Answers false (and does nothing) outside such
     /// a run, where `WaitForTask` (and so `Task.Wait`) is the rule.</summary>
@@ -5398,7 +5419,10 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
         }
 
         state.AwaitsServed++;
-        value = entry.Task.Result;   // the task owns the value AND the exception rule, at THIS await's position
+        // The task owns the value AND the exception rule, at THIS await's position. Read through the wait-and-read
+        // door (never `Task.Result`, whose getter waits again): the journal serves awaits whose task has normally
+        // completed, so this is usually a read, and it is honest when it is not.
+        value = WaitForValue(entry.Task, "await", site.Line, site.Column);
         return true;
     }
 
@@ -7722,10 +7746,41 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     /// capacity overload and answer "Cannot convert string 'x' to int" (measured 2026-10-06), while the
     /// two-argument form worked because only one constructor has that arity.
     ///
+    /// TWO PASSES, because a coercion that merely LETS a value through is not the same as C#'s pick: the EXACT
+    /// type wins first, and only then does the coercible candidate get its turn. Without that, `BigInteger(long)`
+    /// was never reached, because `BigInteger(int)` comes first in metadata and narrowing a `long` to `int` is
+    /// allowed by the engine's lenient numeric coercion: `new BigInteger(42949672960L)` answered 0 and
+    /// `new BigInteger(4294967297L)` answered 1, a silent truncation nothing reported (measured 2026-11-18, found
+    /// by the P3 pin `5 &lt;&lt; 33`). C# has the same two-step shape, where an identity conversion beats every
+    /// convertible one.
+    ///
     /// null when none accepts them, and each caller answers that its own way: the tree coerces anyway so the
     /// refusal names the type it could not convert to, the VM hands the call back for the tree to answer.</summary>
     private ConstructorInfo? SelectClrConstructor(ConstructorInfo[] ctors, IReadOnlyList<object?> values)
     {
+        // THE EXACT PASS RUNS OVER EVERY CANDIDATE FIRST, not per candidate: a later exact match has to beat an
+        // earlier coercible one, which is the whole rule. `GetType()` answers an int for an int and a long for a
+        // long, and a script value is already boxed as the CLR type its literal had.
+        foreach (var c in ctors)
+        {
+            var exactParams = c.GetParameters();
+            var exactHasParams = exactParams.Length > 0 && exactParams[^1].IsDefined(typeof(ParamArrayAttribute), false);
+            if (exactParams.Length != values.Count && !exactHasParams) continue;
+            if (exactHasParams && exactParams.Length != values.Count) continue;   // a params tail is not an exact fit
+            var exact = true;
+            for (var i = 0; i < exactParams.Length; i++)
+            {
+                var v = values[i] is RefCell rc ? rc.Get() : values[i];
+                if (v is null || exactParams[i].ParameterType != v.GetType()) { exact = false; break; }
+            }
+            if (!exact) continue;
+            if (Diagnostics.On("COERCE_TRACE"))
+                Console.Error.WriteLine($"[ctor] exact {c.DeclaringType?.Name}({string.Join(", ", exactParams.Select(p => p.ParameterType.Name))}) with [{string.Join(", ", values.Select(v => v?.GetType().Name ?? "null"))}]");
+            return c;
+        }
+
+        // and only then does a candidate a COERCION can reach get its turn, which is the pass that made
+        // `new StringBuilder("x")` stop taking the capacity overload.
         foreach (var c in ctors)
         {
             var ps = c.GetParameters();
@@ -10763,7 +10818,7 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     /// `-"hello"` went through ToDoubleV, which threw the runtime's own "The input string 'hello' was not in
     /// a correct format." and, being a raw exception, escaped the script's own `try`; the tree's core answers
     /// "Unary minus not defined for type string" (error_msgs_test).</summary>
-    internal static object? ApplyUnaryMinusFromVm(object? value, int line, int column)
+    internal object? ApplyUnaryMinusFromVm(object? value, int line, int column)
         => ApplyUnaryMinus(value, line, column);
 
     /// <summary>The VM's BITWISE COMPLEMENT for an operand its own arm cannot answer (a bool, a string, a null,
@@ -10771,10 +10826,23 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     /// complement operator '~' not defined for type bool" (error_msgs_test Test 3). Same shape as the unary
     /// minus above, and the same reason: the interpreter's core owns both the wording and the refusal, so a
     /// compiled body and a walked one answer alike.</summary>
-    internal static object? ApplyBitwiseComplementFromVm(object? value, int line, int column)
+    internal object? ApplyBitwiseComplementFromVm(object? value, int line, int column)
         => ApplyBitwiseComplement(value, line, column);
 
-    private object? ApplyBinaryOp(object? left, object? right, TokenType op, int line, int column)
+    /// <summary>The VM's `!` for an operand whose type declares op_LogicalNot; the tree's own method owns the
+    /// operator lookup and the truthiness fallback, so a compiled `!` and a walked one answer alike.</summary>
+    internal object? ApplyLogicalNotFromVm(object? value, int line, int column)
+        => ApplyLogicalNot(value, line, column);
+
+    /// <summary>The VM's INC/DEC for a BOXED operand (a CLR struct or class, which its numeric fast path cannot
+    /// read): the tree's increment core picks op_Increment/op_Decrement, and keeps the arithmetic fallback, so a
+    /// compiled `x++` and a walked one answer alike and a type that defines `++` differently from `+ 1` is
+    /// honoured on both legs.</summary>
+    internal object? ApplyIncDecFromVm(object? value, bool increment, int line, int column)
+        => ApplyIncrement(value, increment, line, column);
+
+    private object? ApplyBinaryOp(object? left, object? right, TokenType op, int line, int column,
+                                  bool allowClrStructOperators = true)
     {
         left = UnwrapEnum(left); right = UnwrapEnum(right);
         // -- null guard for equality operators --
@@ -10834,6 +10902,28 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
         if (TryInvokeExtensionOperator(op, left, right, line, column, out var extensionOperatorResult))
             return extensionOperatorResult;
 
+        // 5c-pre (a). `X + string` where X's type declares op_Addition(X, string) is C#'s operator, not the
+        // engine's concatenation, so it is asked BEFORE the concat arm below. D3's rule: `string + X` keeps
+        // concatenation unless the operator really applies in that operand ORDER, which the picker checks.
+        if (allowClrStructOperators && op == TokenType.Plus && (left is string) != (right is string)
+            && TryClrBinaryOp(left, right, op, line, column, out var clrConcatResult))
+            return clrConcatResult;
+
+        // 5c-pre (b). `& | ^ << >>` on the operands' OWN operators: C# prefers a declared operator to the
+        // built-in numeric one, so both tables are asked BEFORE the switch's numeric arms, which read an
+        // operand through ToLong and refused a BigInteger ("Cannot convert '5' to integer"). The NAMED table
+        // goes first because it owns BigInteger, which route B deliberately does not model; route B then
+        // covers an arbitrary CLR type. A plain-number operand fails both gates, so `1 & 2` keeps its path and
+        // pays no lookup.
+        if (op is TokenType.Ampersand or TokenType.Pipe or TokenType.Caret or TokenType.LeftShift
+                or TokenType.RightShift)
+        {
+            if (TryClrValueTypeOp(left, right, op, line, column, out var clrNamedBitwise))
+                return clrNamedBitwise;
+            if (allowClrStructOperators && TryClrBinaryOp(left, right, op, line, column, out var clrBitwiseResult))
+                return clrBitwiseResult;
+        }
+
         switch (op)
         {
             // 2. Handle string concatenation and delegate combination for '+'
@@ -10865,11 +10955,19 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
                     break;
                 }
 
-            // 3. Equality / inequality
+            // 3. Equality / inequality. ROUTE B asks the OPERAND TYPE's own operator first, and only one that
+            // answers a BOOL is used: C#'s `==` for a CLR struct IS its op_Equality (so a type whose equality
+            // ignores a field now answers what C# answers), while a type declaring a component-wise `==` such as
+            // System.Numerics.Vector2 keeps the engine's value equality, because a Vector2 result would turn a
+            // script's `if (v1 == v2)` into a truthy struct. A type declaring neither keeps AreEqual.
             case TokenType.EqualEqual:
+                if (TryClrEqualityOp(left, right, negated: false, line, column, out var structEqResult))
+                    return structEqResult;
                 return AreEqual(left, right);
 
             case TokenType.BangEqual:
+                if (TryClrEqualityOp(left, right, negated: true, line, column, out var structNeResult))
+                    return structNeResult;
                 return !AreEqual(left, right);
 
             // 4. Bitwise shifts
@@ -10895,9 +10993,18 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
                 }
         }
 
-        // 5b. DateTime - DateTime => TimeSpan
-        if (op == TokenType.Minus && left is DateTime dt1 && right is DateTime dt2)
-            return dt1 - dt2;
+        // 5b. The CLR VALUE TYPES this engine names, and the operators C# defines for them. ONE method states the
+        // whole table (TimeSpan, DateTime, DateTimeOffset, BigInteger), and the VM reaches it through
+        // ApplyBinaryOpFromVm like every other arm here, so both engines answer alike with no VM arm of its own.
+        if (TryClrValueTypeOp(left, right, op, line, column, out var clrValueOpResult))
+            return clrValueOpResult;
+
+        // 5c. ROUTE B: an operator an ARBITRARY CLR type declares. The named table above owns the types the
+        // engine names, so this only ever sees a type it does not model, and a shape it cannot answer falls
+        // through to the numeric path and its remedy sentence unchanged. The P3 tokens (`& | ^ << >>`) were
+        // already asked above the switch, where the built-in numeric arms would otherwise have claimed them.
+        if (allowClrStructOperators && TryClrBinaryOp(left, right, op, line, column, out var clrStructOpResult))
+            return clrStructOpResult;
 
         // Preserve float when both operands are float (prevents promotion to double)
         if (left is float lf && right is float rf)
@@ -10965,6 +11072,406 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
             TokenType.GreaterEqual => lnum >= rnum,
             _ => RuntimeError<TokenType>($"Unsupported binary operator {op}", line, column)
         };
+    }
+
+    /// <summary>The CLR value types this engine names, and the operators C# defines for them, in ONE table: two
+    /// TimeSpan values, an interval scaled by a NUMBER, the DateTime and DateTimeOffset pairs, and two BigInteger
+    /// values. A shape the table does not answer falls through to the numeric path below, whose refusal names the
+    /// way out (see NumberRemedy). Answers false when the operands are not this family at all.
+    /// C# is the target, so two rows are surprising ON PURPOSE and both are pinned: `TimeSpan / TimeSpan` answers a
+    /// DOUBLE (60s / 30s is 2) and `TimeSpan * TimeSpan` does not exist (a number scales an interval instead).
+    /// A ZERO divisor is the engine's own "Division by zero." in every row, deliberately not the value C# produces
+    /// there (an Infinity between two intervals, an overflow for a double): one sentence for one mistake.</summary>
+    private static bool TryClrValueTypeOp(object? left, object? right, TokenType op, int line, int column,
+                                          out object? result)
+    {
+        result = null;
+
+        // 1. Two intervals. '+' and '-' and '%' answer an interval; '/' answers a NUMBER (C#'s own rule).
+        if (left is TimeSpan lts && right is TimeSpan rts)
+        {
+            switch (op)
+            {
+                case TokenType.Plus: result = lts + rts; return true;
+                case TokenType.Minus: result = lts - rts; return true;
+                case TokenType.Percent:
+                    // '%' between two INTERVALS does not exist in C# either (this runtime's TimeSpan has no
+                    // op_Modulus; the compiler refuses it), so the row is a refusal that names the way to get one.
+                    RuntimeError("Operator '%' is not defined for two TimeSpan values: C# has no such operator. "
+                                 + "Work in ticks instead ('a.Ticks % b.Ticks').", line, column);
+                    return true;
+                case TokenType.Slash:
+                    if (rts.Ticks == 0) RuntimeError("Division by zero.", line, column);
+                    result = (double)lts.Ticks / rts.Ticks;
+                    return true;
+                case TokenType.Less: result = lts < rts; return true;
+                case TokenType.LessEqual: result = lts <= rts; return true;
+                case TokenType.Greater: result = lts > rts; return true;
+                case TokenType.GreaterEqual: result = lts >= rts; return true;
+                case TokenType.Star:
+                    RuntimeError("Operator '*' is not defined for two TimeSpan values: C# has no such operator. "
+                                 + "Scale one interval with a number ('interval * 2'), or divide them ('a / b' answers a number).",
+                                 line, column);
+                    return true;
+            }
+            return false;
+        }
+
+        // 2. An interval scaled by a NUMBER. C# converts the number to double, so an int, a long, a float and a
+        // decimal all fit; 'number * interval' is legal and 'number / interval' is not.
+        if (left is TimeSpan scaled && IsScalarNumber(right) && op is TokenType.Star or TokenType.Slash)
+        {
+            var factor = Convert.ToDouble(right);
+            if (op == TokenType.Slash && factor == 0) RuntimeError("Division by zero.", line, column);
+            result = ScaleTimeSpan(scaled, factor, divide: op == TokenType.Slash, line, column);
+            return true;
+        }
+        if (right is TimeSpan scaledRight && IsScalarNumber(left) && op == TokenType.Star)
+        {
+            result = ScaleTimeSpan(scaledRight, Convert.ToDouble(left), divide: false, line, column);
+            return true;
+        }
+
+        // 3. A DateTime with an interval or with another DateTime, and the same for a DateTimeOffset.
+        if (left is DateTime ldt)
+        {
+            if (right is TimeSpan span && op is TokenType.Plus or TokenType.Minus)
+            {
+                result = op == TokenType.Plus ? ldt + span : ldt - span;
+                return true;
+            }
+            if (right is DateTime rdt)
+            {
+                switch (op)
+                {
+                    case TokenType.Minus: result = ldt - rdt; return true;   // the arm this table absorbed
+                    case TokenType.Less: result = ldt < rdt; return true;
+                    case TokenType.LessEqual: result = ldt <= rdt; return true;
+                    case TokenType.Greater: result = ldt > rdt; return true;
+                    case TokenType.GreaterEqual: result = ldt >= rdt; return true;
+                }
+            }
+            return false;
+        }
+        if (left is DateTimeOffset ldto)
+        {
+            if (right is TimeSpan offsetSpan && op is TokenType.Plus or TokenType.Minus)
+            {
+                result = op == TokenType.Plus ? ldto + offsetSpan : ldto - offsetSpan;
+                return true;
+            }
+            if (right is DateTimeOffset rdto)
+            {
+                switch (op)
+                {
+                    case TokenType.Minus: result = ldto - rdto; return true;
+                    case TokenType.Less: result = ldto < rdto; return true;
+                    case TokenType.LessEqual: result = ldto <= rdto; return true;
+                    case TokenType.Greater: result = ldto > rdto; return true;
+                    case TokenType.GreaterEqual: result = ldto >= rdto; return true;
+                }
+            }
+            return false;
+        }
+
+        // 4. Two integers of arbitrary size. C# also accepts an int or a long beside a BigInteger, which is why
+        // that pair normalises first; a decimal does not, so it keeps falling through to the refusal.
+        // The P3 family is C#'s own: `&`, `|`, `^` on two arbitrary-precision integers, `~` (the unary arm in
+        // ApplyBitwiseComplement), and `<<`/`>>`. A SHIFT is asked here only when the LEFT operand is the
+        // BigInteger, because C# declares op_LeftShift(BigInteger, int): the count is a whole number, nothing is
+        // MASKED (a BigInteger has no width, so `5 << 33` is 42949672960, measured), and a NEGATIVE count shifts
+        // the other way (`5 << -2` is 1, `5 >> -2` is 20, also measured), both of which come from .NET's operator
+        // rather than from a rule restated here.
+        if (left is System.Numerics.BigInteger || right is System.Numerics.BigInteger)
+        {
+            if (op is TokenType.LeftShift or TokenType.RightShift && left is System.Numerics.BigInteger shifted)
+            {
+                var count = BigIntegerShiftCount(right, line, column);
+                result = op == TokenType.LeftShift ? shifted << count : shifted >> count;
+                return true;
+            }
+            if (!TryAsBigInteger(left, out var lbi) || !TryAsBigInteger(right, out var rbi))
+                return false;
+            switch (op)
+            {
+                case TokenType.Plus: result = lbi + rbi; return true;
+                case TokenType.Minus: result = lbi - rbi; return true;
+                case TokenType.Star: result = lbi * rbi; return true;
+                case TokenType.Slash:
+                    if (rbi.IsZero) RuntimeError("Division by zero.", line, column);
+                    result = lbi / rbi;
+                    return true;
+                case TokenType.Percent:
+                    if (rbi.IsZero) RuntimeError("Division by zero.", line, column);
+                    result = lbi % rbi;
+                    return true;
+                case TokenType.Ampersand: result = lbi & rbi; return true;
+                case TokenType.Pipe: result = lbi | rbi; return true;
+                case TokenType.Caret: result = lbi ^ rbi; return true;
+                case TokenType.Less: result = lbi < rbi; return true;
+                case TokenType.LessEqual: result = lbi <= rbi; return true;
+                case TokenType.Greater: result = lbi > rbi; return true;
+                case TokenType.GreaterEqual: result = lbi >= rbi; return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>ROUTE B: an operator an ARBITRARY CLR type declares (a System.Numerics.Vector2, a type the host
+    /// compiled in, a user's own struct OR class). Selected the way C# selects one, from the OPERAND types and on
+    /// the left operand's type first, through the engine's own overload picker and coercion funnel. Answers false
+    /// when the operands are not this family or the type declares no operator for the token, so everything that ran
+    /// before it, the named table and the numeric path with its remedy sentence, is untouched. The plan is
+    /// docs/reasonix/plans/2026-11-17-clr-struct-operators.md.</summary>
+    private bool TryClrBinaryOp(object? left, object? right, TokenType op, int line, int column,
+                                out object? result)
+    {
+        result = null;
+        // A null operand never reaches an operator: C# resolves it from the DECLARED type, which this engine does
+        // not retain, and the equality arms have their own null rule above.
+        if (left is null || right is null) return false;
+        var name = ClrOperatorName(op, unary: false);
+        if (name is null) return false;
+
+        var leftType = left.GetType();
+        var rightType = right.GetType();
+        var leftEligible = IsClrOperatorOperand(leftType);
+        var rightEligible = IsClrOperatorOperand(rightType);
+        if (!leftEligible && !rightEligible) return false;
+
+        var argTypes = new[] { leftType, rightType };
+        var operands = new[] { left, right };
+        if (leftEligible && TryClrOperator(leftType, name, argTypes, operands, line, column, out result))
+            return true;
+        if (rightEligible && rightType != leftType
+            && TryClrOperator(rightType, name, argTypes, operands, line, column, out result))
+            return true;
+        return false;
+    }
+
+    /// <summary>ROUTE B for `==`/`!=`: the type's operator when it declares one that ANSWERS A BOOL, otherwise
+    /// nothing, so the engine's value equality answers as it always has. A type declaring only op_Equality answers
+    /// its negation for `!=`, which is C#'s own pairing rule (the two are declared together).</summary>
+    private bool TryClrEqualityOp(object? left, object? right, bool negated, int line, int column,
+                                  out object? result)
+    {
+        result = null;
+        if (negated)
+        {
+            if (TryClrBinaryOp(left, right, TokenType.BangEqual, line, column, out result)) return true;
+            if (TryClrBinaryOp(left, right, TokenType.EqualEqual, line, column, out var equality)
+                && equality is bool asBool)
+            {
+                result = !asBool;
+                return true;
+            }
+            return false;
+        }
+        return TryClrBinaryOp(left, right, TokenType.EqualEqual, line, column, out result);
+    }
+
+    /// <summary>ROUTE B for a unary operator: unary minus, `!`, `~`, `++` and `--`, each through the name C#
+    /// uses for it.</summary>
+    private bool TryClrUnaryOp(object? operand, TokenType op, int line, int column, out object? result)
+    {
+        result = null;
+        if (operand is null) return false;
+        var name = ClrOperatorName(op, unary: true);
+        if (name is null) return false;
+        var type = operand.GetType();
+        if (!IsClrOperatorOperand(type)) return false;
+        return TryClrOperator(type, name, new[] { type }, new[] { operand }, line, column, out result);
+    }
+
+    /// <summary>The ONE place an operator is picked, coerced and invoked, cached per (declaring type, name, operand
+    /// types). MISSES are cached too, or a refusal would walk GetMethods on every operand. An ABSTRACT operator (an
+    /// interface's static abstract member, which a type's interfaces expose) cannot be invoked, so it is a miss.</summary>
+    private bool TryClrOperator(Type declaring, string name, Type[] argTypes, object?[] operands,
+                                int line, int column, out object? result)
+    {
+        result = null;
+        var method = ResolveClrOperator(declaring, name, argTypes);
+        if (method is null) return false;
+        var parameters = method.GetParameters();
+        if (parameters.Length != operands.Length) return false;
+        var args = new object?[parameters.Length];
+        for (var i = 0; i < args.Length; i++)
+            args[i] = CoerceArgument(operands[i], parameters[i].ParameterType, line, column);
+        try
+        {
+            result = method.Invoke(null, args);
+        }
+        catch (Exception ex)
+        {
+            // The ONE message map owns a script-visible failure, and a ScriptException raised INSIDE an operator
+            // passes through it untouched, so its own text and position survive.
+            throw ClrMemberFailure(ex, line, column, name);
+        }
+        return true;
+    }
+
+    /// <summary>The picker alone: the cached binding for (declaring type, op_ name, operand types), or null.
+    /// Split from the invoke so a caller can ask whether an operator WOULD answer without running it.</summary>
+    private MethodInfo? ResolveClrOperator(Type declaring, string name, Type[] argTypes)
+    {
+        var key = (declaring, name, argTypes[0], argTypes.Length > 1 ? argTypes[1] : (Type?)null);
+        if (!_clrOperatorCache.TryGetValue(key, out var binding))
+        {
+            var found = FindBestMethod(declaring, name, argTypes.Length, argTypes,
+                                       BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+            if (found is not null && (found.IsAbstract || found.IsGenericMethodDefinition)) found = null;
+            // `==`/`!=` are consulted only when the operator ANSWERS A BOOL. A component-wise `==`, which
+            // System.Numerics.Vector2 declares (it returns a Vector2), would make a script's `if (v1 == v2)` true
+            // for any non-null struct, so such a type keeps the engine's value equality.
+            if (found is not null && name is "op_Equality" or "op_Inequality" && found.ReturnType != typeof(bool))
+                found = null;
+            binding = new ClrOperatorBinding(found);
+            _clrOperatorCache[key] = binding;
+        }
+        return binding.Method;
+    }
+
+    /// <summary>Whether `+` on these operands is the NON-STRING operand's own op_Addition that takes a string —
+    /// D3's exception to the engine's concatenation rule. The tree and the VM both ask it BEFORE their concat
+    /// arm, so `x + "a"` uses X's operator exactly where C# would, and every other pair keeps the engine's own
+    /// display rule (which a delegated concat would replace with a raw CLR type name, measured).</summary>
+    internal bool ClrConcatOperatorApplies(object? left, object? right)
+    {
+        if (left is null || right is null) return false;
+        if ((left is string) == (right is string)) return false;
+        var other = left is string ? right : left;
+        var type = other.GetType();
+        if (!IsClrOperatorOperand(type)) return false;
+        return ResolveClrOperator(type, "op_Addition", new[] { left.GetType(), right.GetType() }) is not null;
+    }
+
+    /// <summary>Which token maps to which CLR operator NAME. `-` is two operators, so unary is asked explicitly;
+    /// the same is true of `!`, `~`, `++` and `--`, which have no binary spelling.</summary>
+    private static string? ClrOperatorName(TokenType op, bool unary) => op switch
+    {
+        TokenType.Plus => "op_Addition",
+        TokenType.Minus => unary ? "op_UnaryNegation" : "op_Subtraction",
+        TokenType.Star => "op_Multiply",
+        TokenType.Slash => "op_Division",
+        TokenType.Percent => "op_Modulus",
+        TokenType.Less => "op_LessThan",
+        TokenType.LessEqual => "op_LessThanOrEqual",
+        TokenType.Greater => "op_GreaterThan",
+        TokenType.GreaterEqual => "op_GreaterThanOrEqual",
+        TokenType.EqualEqual => "op_Equality",
+        TokenType.BangEqual => "op_Inequality",
+        TokenType.Ampersand => "op_BitwiseAnd",
+        TokenType.Pipe => "op_BitwiseOr",
+        TokenType.Caret => "op_ExclusiveOr",
+        TokenType.LeftShift => "op_LeftShift",
+        TokenType.RightShift => "op_RightShift",
+        TokenType.Tilde => unary ? "op_OnesComplement" : null,
+        TokenType.Bang => unary ? "op_LogicalNot" : null,
+        TokenType.PlusPlus => unary ? "op_Increment" : null,
+        TokenType.MinusMinus => unary ? "op_Decrement" : null,
+        _ => null,
+    };
+
+    /// <summary>A value whose runtime type could declare an operator, excluding the shapes the engine models
+    /// elsewhere: a primitive, an enum, decimal (the numeric path), the named CLR value types route A owns, a
+    /// string and an array. A STRUCT qualifies as it stands; a CLASS qualifies only when it DECLARES an operator,
+    /// which C# allows and which D3 of the plan enables (so `list == list2` pays one cached type read, never a
+    /// GetMethods walk). This is the gate that keeps `1 + 2` and `"a" + 1` from ever paying a lookup. The VM asks
+    /// it too, because `==` on such an operand must reach the type's own operator on the compiled leg.</summary>
+    internal static bool IsClrOperatorOperand(Type type)
+    {
+        if (type.IsPrimitive || type.IsEnum) return false;
+        if (type == typeof(decimal) || type == typeof(string) || type.IsArray) return false;
+        if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan)) return false;
+        if (type == typeof(System.Numerics.BigInteger)) return false;
+        // A script instance is the engine's own value, answered by the arms above (its operators are script
+        // `operator` declarations, not CLR op_ methods), so it is never handed to this lookup.
+        if (type == typeof(ClassInstance) || type == typeof(StructInstance)) return false;
+        return type.IsValueType || DeclaresClrOperator(type);
+    }
+
+    /// <summary>Whether a class declares ANY operator. Cached per type, misses included, because the answer is
+    /// asked on every equality and bitwise operation with an object operand.</summary>
+    private static bool DeclaresClrOperator(Type type)
+    {
+        if (_declaresClrOperator.TryGetValue(type, out var known)) return known;
+        var declares = false;
+        try
+        {
+            foreach (var m in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
+            {
+                if (!m.Name.StartsWith("op_", StringComparison.Ordinal)) continue;
+                declares = true;
+                break;
+            }
+        }
+        catch (Exception)
+        {
+            declares = false;
+        }
+        _declaresClrOperator[type] = declares;
+        return declares;
+    }
+
+    private static readonly ConcurrentDictionary<Type, bool> _declaresClrOperator = new();
+
+    /// <summary>The per-(declaring type, operator, operand types) slot: a MethodInfo, or null for a type that
+    /// declares none, which is cached so that a refusal costs one dictionary read thereafter.</summary>
+    private static readonly ConcurrentDictionary<(Type Declaring, string Name, Type Left, Type? Right), ClrOperatorBinding> _clrOperatorCache = new();
+
+    private readonly struct ClrOperatorBinding
+    {
+        public readonly MethodInfo? Method;
+        public ClrOperatorBinding(MethodInfo? method) => Method = method;
+    }
+
+    /// <summary>A number C# would convert to double when scaling an interval.</summary>
+    private static bool IsScalarNumber(object? value)
+        => value is int or long or float or double or decimal or short or byte or sbyte;
+
+    /// <summary>The ONE way an interval is scaled, so a multiplication and a division cannot round two ways.
+    /// C#'s own TimeSpan.Multiply rounds a HALF TICK TO EVEN (measured on this build: FromTicks(1).Multiply(0.5) is
+    /// 0 and Multiply(1.5) is 2), so this must not truncate; a result outside the tick range is REFUSED rather than
+    /// wrapped into a different interval.</summary>
+    private static TimeSpan ScaleTimeSpan(TimeSpan value, double factor, bool divide, int line, int column)
+    {
+        var scaled = divide ? value.Ticks / factor : value.Ticks * factor;
+        if (double.IsNaN(scaled) || scaled > long.MaxValue || scaled < long.MinValue)
+            RuntimeError($"TimeSpan too long: '{value}' scaled by {factor} does not fit in a TimeSpan.", line, column);
+        return TimeSpan.FromTicks((long)Math.Round(scaled));
+    }
+
+    /// <summary>An arbitrary-precision integer as one, when C# would accept the value in that position.</summary>
+    private static bool TryAsBigInteger(object? value, out System.Numerics.BigInteger result)
+    {
+        switch (value)
+        {
+            case System.Numerics.BigInteger bi: result = bi; return true;
+            case int i: result = i; return true;
+            case long l: result = l; return true;
+            default: result = default; return false;
+        }
+    }
+
+    /// <summary>The COUNT of a BigInteger shift, which C#'s signature declares as an `int`:
+    /// `op_LeftShift(BigInteger, int)`. A whole number of ANY spelling is accepted, which is the engine's own
+    /// lenient count rule (the numeric shift row already takes `"3"` and `3.5`), and a NEGATIVE one is passed
+    /// through because the operator shifts the other way (`5 << -2` is 1, measured against .NET). A BigInteger
+    /// count is read here rather than through `ToLong`, which cannot convert one (this runtime answers "Unable
+    /// to cast BigInteger to IConvertible", measured). The engine's numeric row MASKS its count (`&amp; 0x1F`/
+    /// `&amp; 0x3F`) and this one deliberately does not: a BigInteger has no width to mask by, which is why
+    /// `big &lt;&lt; 33` is 42949672960 here while `1 &lt;&lt; 33` is 2.</summary>
+    private static int BigIntegerShiftCount(object? value, int line, int column)
+    {
+        var count = value is System.Numerics.BigInteger bigCount
+            ? bigCount >= int.MinValue && bigCount <= int.MaxValue
+                ? (long)bigCount
+                : RuntimeError<long>($"A BigInteger shift count must fit in an int, and '{bigCount}' does not.", line, column)
+            : ToLong(value, line, column);
+        if (count is > int.MaxValue or < int.MinValue)
+            RuntimeError($"A BigInteger shift count must fit in an int, and '{count}' does not.", line, column);
+        return (int)count;
     }
 
     /// <summary>The source spelling of an overloadable operator token, for messages.</summary>
@@ -11039,11 +11546,43 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
         }
         catch
         {
-            RuntimeError(val is DateTime
-                ? $"Cannot convert '{val}' to number: {DateTimeNumberRemedy}"
-                : $"Cannot convert '{val}' to number.", line, column);
+            // The remedy is the ONE place a script learns what to write instead, per type family: a bare
+            // "Cannot convert '00:03:00' to number" named nothing a reader could act on, which is the defect the
+            // DateTime sentence was added for and which TimeSpan, Guid and BigInteger still had.
+            var remedy = NumberRemedy(val);
+            RuntimeError(remedy.Length == 0
+                ? $"Cannot convert '{val}' to number."
+                : $"Cannot convert '{val}' to number: {remedy}", line, column);
             return 0;
         }
+    }
+
+    /// <summary>What to write instead, when a value of a named type reached the NUMBER coercion. One sentence per
+    /// family, because a bare conversion failure tells a reader nothing they can act on; DateTime's own sentence is
+    /// kept verbatim (a COM date cell arrives as a real DateTime, so `1.0 * cell` is the shape that meets it).
+    /// A type with no better advice answers an empty string, which keeps the plain sentence.</summary>
+    private static string NumberRemedy(object? value)
+    {
+        if (value is DateTime) return DateTimeNumberRemedy;
+        if (value is TimeSpan)
+            return "a TimeSpan is not a number here, so use .TotalSeconds or .Ticks for its size, "
+                   + ".TotalMilliseconds to time a call, and .Add(...) or '+' to combine two of them";
+        if (value is Guid)
+            return "a Guid is not a number here, so compare two of them with '<', '<=', '>', '>=' or '==', "
+                   + "or use .CompareTo(other) for that same ordering";
+        if (value is System.Numerics.BigInteger)
+            return "a BigInteger is not a number here, so combine two BIGINTEGERS with '+', '-', '*', '/', '%', "
+                   + "'&', '|', '^', '<<' or '>>', or read .ToString() to format it";
+        if (value is System.Diagnostics.Stopwatch)
+            return "a Stopwatch is not a number here, so read .Elapsed (a TimeSpan) or .ElapsedMilliseconds first";
+        // An ARBITRARY CLR struct the engine does not model: name the TYPE (a value renders as its own text, which
+        // names nothing a reader can act on) and say where an operator could come from. This is the sentence a
+        // script meets when it writes an operator the type does not declare, and it is what route B's miss feeds.
+        if (value is not null && value.GetType().IsValueType && !value.GetType().IsPrimitive
+            && !value.GetType().IsEnum && value is not decimal)
+            return $"a value of type '{value.GetType().Name}' is not a number here: use an operator the type "
+                   + "declares (for example '+' when it declares op_Addition), or read its members";
+        return "";
     }
 
     /// <summary>
@@ -11522,11 +12061,24 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     {
         var slot = ResolveTarget(inc.Target, inc.Line, inc.Column);
         var old = slot.Current;
-        var delta = inc.Operator.Type == TokenType.PlusPlus ? 1L : -1L;
-        var updated = ApplyBinaryOp(old, delta, TokenType.Plus, inc.Line, inc.Column);
+        var updated = ApplyIncrement(old, inc.Operator.Type == TokenType.PlusPlus, inc.Line, inc.Column);
         slot.Write(updated);
         // A POSTFIX form answers the value the target HELD; a prefix form answers the new one.
         return inc.IsPrefix ? updated : old;
+    }
+
+    /// <summary>`++`/`--` on a value: the type's OWN op_Increment/op_Decrement when it declares one, which is
+    /// C#'s rule and the reason `++` is not `+ 1` (a type may define them differently); otherwise the engine's
+    /// arithmetic fallback the increment site has always used, with the CLR operand hook OFF so a type whose
+    /// only operators are arithmetic still cannot answer `++` through op_Addition. The VM's INC/DEC reach this
+    /// same method, so a walked increment and a compiled one answer alike.</summary>
+    private object? ApplyIncrement(object? old, bool increment, int line, int column)
+    {
+        if (TryClrUnaryOp(old, increment ? TokenType.PlusPlus : TokenType.MinusMinus, line, column,
+                          out var clrIncremented))
+            return clrIncremented;
+        return ApplyBinaryOp(old, increment ? 1L : -1L, TokenType.Plus, line, column,
+                             allowClrStructOperators: false);
     }
 
     private object? InvokeDelegate(object? del, object?[] args)
@@ -11980,11 +12532,19 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
     /// registered as they are bound (see the loader). A NAME IS NOT UNIQUE: two bodies may each declare `Note`, and the
     /// first-wins map then hands one body's code to the other's declaration (measured: `nested_decl_hoisting_test` 1a
     /// ran the second lambda's `Note`, whose `label` capture is not passed, and printed `:one`).</summary>
-    private void RegisterNestedDecl(FuncDecl d)
+    private void RegisterNestedDecl(FuncDecl d) => RegisterNestedDecl(d, d.Line, d.Column);
+
+    /// <summary>The same registration with the position STATED, which a TEXT-carried declaration needs: the loader
+    /// re-parses the declaration's own source, so the node's Line/Column are relative to that SNIPPET, while the
+    /// compiled caller's `__nested_fn__` passes the position recorded on the WIRE (the declaration's place in its
+    /// file). Without the wire's position the lookup missed and a compiled caller could not reach a tree-only helper:
+    /// measured, a `Task.Run` body declaring `void Bump() { try { ... } }` and calling it twice answered "loaded from
+    /// bytecode for a different environment" from its bundle while the file printed its value (`vm_caplambda` 10a).</summary>
+    private void RegisterNestedDecl(FuncDecl d, int line, int column)
     {
         if (d.Name is not { Length: > 0 }) return;
         NestedFunctionDecls.TryAdd(d.Name, d);
-        NestedFunctionDeclsAt.TryAdd((d.Name, d.Line, d.Column), d);
+        NestedFunctionDeclsAt.TryAdd((d.Name, line, column), d);
     }
 
     private void RegisterNestedDecls(Bytecode? bc, bool toExports = true)
@@ -12790,6 +13350,24 @@ internal partial class Interpreter : IExprVisitor<object?>, IStmtVisitor, IDispo
             if (rentedArgs != null) ArrayPool.Return(rentedArgs);
             _vmReentryDepth--;
         }
+    }
+
+    /// <summary>Invokes a bundle's PROGRAM ENTRY and answers what the run answers. A top-level `await` makes such a
+    /// body ASYNC (the loader derives that from the body's own AWAIT, the shape .NET 11's runtime async supports
+    /// natively), so the invocation hands back the engine's <see cref="Task"/> rather than a value: this is the ONE
+    /// door that awaits it, at the run-entry site, exactly as a C# entry point does for an `async Main`. Nothing
+    /// inside the engine waits (see <see cref="WaitForValue"/>), and a synchronous entry is answered as it always
+    /// was. THE ALTERNATIVE WAS MEASURED AND REJECTED: a C# suspension loop inside the VM body (a wait per awaited
+    /// task, resuming `Vm.ExecuteResumedCore`) gives the same values but is a second async model in the interpreter,
+    /// where the runtime's own — the coroutine's `AwaitRequest`, driven by the pump — already exists.</summary>
+    internal object? InvokeRunEntry(ScriptFunction entry, bool takeVoidAnswer = true)
+    {
+        var answer = InvokeScriptFunction(entry, [], 0, 0, takeVoidAnswer: takeVoidAnswer);
+        var value = answer is Task runTask ? WaitForValue(runTask, "run entry", 0, 0) : answer;
+        // A VOID TAIL IS NOT AN ANSWER, and the async route hands it over as the engine's `VoidMarker` sentinel
+        // (`entry __program__() => <void>`, measured): the source run answers null for the same program, and the
+        // binary verdict must too. `takeVoidAnswer` keeps a `return <value>` on a Void body, which is not a marker.
+        return ReferenceEquals(value, VoidMarker.Instance) ? null : value;
     }
 
     internal object? InvokeScriptFunction(ScriptFunction fn, object?[] args, int line, int column, CoroutineState? resumeState = null, bool isTailCall = false, bool wantRefResult = false, bool takeVoidAnswer = false)

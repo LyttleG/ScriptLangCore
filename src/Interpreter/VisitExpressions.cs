@@ -450,7 +450,10 @@ internal partial class Interpreter
         // String concatenation, check before widening so chars stay as chars. Both sides go through the ONE
         // display rule (ValueFormatter.ToDisplay) rather than ToString, so a `Type` operand shows the name a
         // script can write here exactly as it does in print(); interpolation desugars into this same node.
-        if (node.Operator.Type == TokenType.Plus && (left is string || right is string))
+        // D3's exception: when the non-string operand's type declares op_Addition(X, string), C# uses that
+        // operator, so the concat arm steps aside and ApplyBinaryOp asks it.
+        if (node.Operator.Type == TokenType.Plus && (left is string || right is string)
+            && !ClrConcatOperatorApplies(left, right))
             return string.Concat(ValueFormatter.ToDisplay(left), ValueFormatter.ToDisplay(right));
 
         // Widen small integer types to int so arithmetic stays precise
@@ -528,17 +531,38 @@ internal partial class Interpreter
         return node.Operator.Type switch
         {
             TokenType.Minus => ApplyUnaryMinus(right, node.Line, node.Column),
-            TokenType.Bang => !IsTruthy(right),
+            TokenType.Bang => ApplyLogicalNot(right, node.Line, node.Column),
             TokenType.Tilde => ApplyBitwiseComplement(right, node.Line, node.Column),
             _ => RuntimeError<object>($"Unsupported unary operator {node.Operator.Type}", node.Line, node.Column)
         };
     }
 
+    /// <summary>`!value`: a CLR type that declares op_LogicalNot answers it, which is C#'s own `!`; every other
+    /// operand keeps the engine's truthiness rule. The VM's NOT reaches the same method, so a walked and a
+    /// compiled `!` cannot disagree.</summary>
+    private object ApplyLogicalNot(object? value, int line, int column)
+    {
+        if (TryClrUnaryOp(value, TokenType.Bang, line, column, out var clrNot))
+            return clrNot!;
+        return !IsTruthy(value);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static object ApplyUnaryMinus(object? value, int line, int column)
+    private object ApplyUnaryMinus(object? value, int line, int column)
     {
         if (value == null)
             RuntimeError("Cannot apply unary minus to null.", line, column);
+
+        // The CLR value types C# defines a unary minus for, ahead of the numeric table: `-interval` negates an
+        // interval and `-big` negates an arbitrary-precision integer. A TimeSpan's TypeCode is Object, so without
+        // this it answered "Unary minus not defined for type TimeSpan" (measured, before the operator table).
+        if (value is TimeSpan tsNegated) return -tsNegated;
+        if (value is System.Numerics.BigInteger bigNegated) return -bigNegated;
+
+        // ROUTE B: an operator an arbitrary CLR type declares for unary minus. Route A's named arms above own
+        // TimeSpan and BigInteger, so this only ever sees a type the engine does not model.
+        if (TryClrUnaryOp(value, TokenType.Minus, line, column, out var clrStructNegated))
+            return clrStructNegated!;
 
         return Type.GetTypeCode(value.GetType()) switch
         {
@@ -555,10 +579,21 @@ internal partial class Interpreter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static object ApplyBitwiseComplement(object? value, int line, int column)
+    private object ApplyBitwiseComplement(object? value, int line, int column)
     {
         if (value == null)
             RuntimeError("Cannot apply bitwise complement to null.", line, column);
+
+        // Route A's named table owns the CLR value types this engine names, and `~big` is C#'s own
+        // op_OnesComplement: `~new BigInteger(5)` is -6, measured against .NET. BigInteger is excluded from
+        // route B (the named table owns it), so without this arm the numeric TypeCode table below answered
+        // "Bitwise complement operator '~' not defined for type BigInteger".
+        if (value is System.Numerics.BigInteger bigComplement) return ~bigComplement;
+
+        // ROUTE B: a CLR type's own op_OnesComplement (System.Numerics.Vector2 declares one). The numeric
+        // TypeCode table below is the engine's own arm and is reached only when no operator answered.
+        if (TryClrUnaryOp(value, TokenType.Tilde, line, column, out var clrComplement))
+            return clrComplement!;
 
         return Type.GetTypeCode(value.GetType()) switch
         {
@@ -3306,6 +3341,15 @@ internal partial class Interpreter
         if (paramType == typeof(char) && argType == typeof(string))
             return true;
 
+        // C#'s IMPLICIT CONVERSIONS TO BigInteger, which is how `BigInteger.Pow(2, 100)` is legal: any integral
+        // argument fits a BigInteger parameter. This is the other half of the coercion arm that converts it, and it
+        // is needed for the reason the two arms above give: selection runs BEFORE coercion, so teaching only the
+        // conversion left the call reporting that no overload existed (measured: "Method 'Pow' has no overload for
+        // (int, int): it takes (BigInteger, int)").
+        if ((Nullable.GetUnderlyingType(paramType) ?? paramType) == typeof(System.Numerics.BigInteger)
+            && IsIntegerType(Nullable.GetUnderlyingType(argType) ?? argType))
+            return true;
+
         // ScriptFunction is compatible with any delegate type, CoerceArgument handles wrapping
         if (typeof(Delegate).IsAssignableFrom(paramType) && (argType == typeof(ScriptFunction) || typeof(ScriptFunction).IsAssignableFrom(argType)))
             return true;
@@ -3391,6 +3435,27 @@ internal partial class Interpreter
             // own "Invalid cast from 'System.Int32' to 'System.StringComparison'".
             if (underlyingTarget.IsEnum && IsIntegerType(argType))
                 return Enum.ToObject(underlyingTarget, arg);
+
+            // C#'s OWN IMPLICIT CONVERSIONS TO BigInteger, which is how `BigInteger.Pow(2, 100)` is legal: every
+            // integral type converts implicitly, and none of them goes through `Convert.ChangeType`, because
+            // BigInteger is not IConvertible on this runtime (measured: "Unable to cast object of type
+            // 'System.Numerics.BigInteger' to type 'System.IConvertible'"). Written as a switch on the VALUE so a
+            // `ulong` above long range keeps its whole value instead of overflowing a ToInt64.
+            if (underlyingTarget == typeof(System.Numerics.BigInteger))
+            {
+                switch (arg)
+                {
+                    case System.Numerics.BigInteger already: return already;
+                    case int i: return new System.Numerics.BigInteger(i);
+                    case long l: return new System.Numerics.BigInteger(l);
+                    case short sh: return new System.Numerics.BigInteger(sh);
+                    case byte by: return new System.Numerics.BigInteger(by);
+                    case sbyte sb: return new System.Numerics.BigInteger(sb);
+                    case ushort us: return new System.Numerics.BigInteger(us);
+                    case uint ui: return new System.Numerics.BigInteger(ui);
+                    case ulong ul: return new System.Numerics.BigInteger(ul);
+                }
+            }
 
             if (underlyingTarget == typeof(string))
                 return arg.ToString();

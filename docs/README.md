@@ -342,6 +342,22 @@ run is in flight, and create/free cycles that leak no handles. It refuses a DLL 
 its exit code is the verdict (`0` every check passed, `1` a check failed, `2` it could not start). It prints the
 version and ABI revision it measured, so a run against a stale artifact says so first.
 
+`src/build/jitplugin-check.sh` is its twin one boundary over: it pins `src/Host/JitPlugins/`, the loader that lets an
+AOT process reach JIT code by starting a second CoreCLR (nethost finds hostfxr, hostfxr initialises for the plugin's own
+`runtimeconfig.json`, one call resolves `PluginInit`, and the plugin fills a versioned table with a typed slot and one
+verb door). It builds the fixture (`src/jitplugins/Fixture/`, an ordinary JIT class library written as a third party
+would write one), publishes the check as a NativeAOT host (`src/jitplugins/Check/`, which compiles the loader's
+sources by link so it measures the shipped file), stages `nethost.dll` from the apphost pack beside it, and runs
+fourteen checks: the load, the abi, the typed slot, the verb door, a 4000-byte answer through the length probe, a
+UTF-8 answer with an accent and an astral-plane character, the four envelope refusals (not an envelope, a verdict
+contradicted by an error, another envelope version, a plugin failure turned into a code), the plugin's own unknown-verb
+refusal, and the loader's three host-side refusals (a bare type name, another abi, parameters that are not an object).
+Four legs then measure the COMPOSITION, which is what a script sees: `--plugin <dll> <Type>` installs the plugin's door
+as the session's bridge, so a script's `Bridge.Call` answers with the plugin's own envelope (and a refusal as its
+`e.code`); the same door survives a `--repl` session's `.run`; a plugin file that is not there is refused by name and
+nothing runs; and a wrong entry type names `0x80131522`. They run against the DEBUG engine on purpose: an AOT host
+reaching JIT code is what the harness's own checks measure, and the composition is engine-agnostic plumbing.
+
 `src/build/run-misc-scripts.sh` runs the maintainer's own `assets/language/misc/**` scripts, which are a regression set he
 runs by hand, and they are not suites, since they live outside `SUITE_DIR`, mostly only
 `print` (no `Check`/`CheckSummary`) and the directory is gitignored, so nothing else in the tree ever ran them.
